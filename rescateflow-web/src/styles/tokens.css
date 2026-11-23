@@ -1,0 +1,70 @@
+/*
+ * Tokens de diseno de RescateFlow: consola de despacho nocturna.
+ * Fondo azul pizarra (no negro), un unico acento interactivo azul senal
+ * y los cuatro colores de triaje reservados exclusivamente para la prioridad.
+ */
+:root {
+  /* Superficies */
+  --noche: #0e1621;
+  --panel: #142030;
+  --panel-alto: #1a283b;
+  --linea: #233348;
+  --linea-fuerte: #31465f;
+
+  /* Texto */
+  --texto: #e6edf5;
+  --texto-tenue: #8da0b6;
+  --texto-apagado: #627389;
+
+  /* Interaccion */
+  --senal: #4da3ff;
+  --senal-hover: #74b8ff;
+  --senal-fondo: rgba(77, 163, 255, 0.12);
+
+  /* Triaje (solo prioridad) */
+  --critica: #ef5350;
+  --alta: #f39c3d;
+  --media: #e5c14b;
+  --baja: #45c08a;
+
+  /* Estados de emergencia */
+  --estado-reportada: #9fb2c8;
+  --estado-validada: #4da3ff;
+  --estado-despachada: #a78bfa;
+  --estado-en-atencion: #f2b84b;
+  --estado-cerrada: #45c08a;
+  --estado-cancelada: #6b7c90;
+
+  /* Estados de unidad */
+  --unidad-disponible: #45c08a;
+  --unidad-en-ruta: #a78bfa;
+  --unidad-ocupada: #f2b84b;
+  --unidad-fuera: #6b7c90;
+
+  /* Avisos */
+  --exito: #45c08a;
+  --error: #ff6b66;
+  --aviso: #f2b84b;
+
+  /* Tipografia */
+  --fuente-texto: 'Barlow', 'Segoe UI', system-ui, sans-serif;
+  --fuente-rotulo: 'Barlow Semi Condensed', 'Barlow', 'Arial Narrow', sans-serif;
+  --t-xs: 0.75rem;
+  --t-sm: 0.8125rem;
+  --t-base: 0.9375rem;
+  --t-md: 1.0625rem;
+  --t-lg: 1.3125rem;
+  --t-xl: 2.125rem;
+
+  /* Espaciado y forma */
+  --e-1: 4px;
+  --e-2: 8px;
+  --e-3: 12px;
+  --e-4: 16px;
+  --e-5: 24px;
+  --e-6: 32px;
+  --radio-panel: 10px;
+  --radio-control: 6px;
+  --radio-insignia: 999px;
+  --sombra-modal: 0 24px 60px rgba(2, 6, 12, 0.6);
+}

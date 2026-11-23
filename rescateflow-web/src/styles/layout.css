@@ -1,0 +1,199 @@
+/* ------------------------------------------------------------ estructura */
+.aplicacion {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.tablero {
+  flex: 1;
+  width: 100%;
+  max-width: 1760px;
+  margin: 0 auto;
+  padding: var(--e-4) var(--e-5) var(--e-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--e-4);
+}
+
+.tablero__columnas {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr) minmax(260px, 320px);
+  gap: var(--e-4);
+  align-items: start;
+}
+
+/* Formulario y unidades acompanan el desplazamiento de la cola */
+.panel--formulario,
+.panel--unidades {
+  position: sticky;
+  top: var(--e-4);
+  max-height: calc(100vh - 2 * var(--e-4));
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+@media (max-width: 1280px) {
+  .tablero__columnas {
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  }
+  .panel--unidades {
+    grid-column: 1 / -1;
+    position: static;
+    max-height: none;
+  }
+  .panel--unidades .lista-unidades {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .tablero {
+    padding: var(--e-3);
+  }
+  .tablero__columnas {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .panel--formulario {
+    position: static;
+    max-height: none;
+    order: 2;
+  }
+  .panel--cola {
+    order: 1;
+  }
+  .panel--unidades {
+    order: 3;
+  }
+}
+
+/* ------------------------------------------------------------ encabezado */
+.encabezado {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-4);
+  flex-wrap: wrap;
+  padding: var(--e-3) var(--e-5);
+  border-bottom: 1px solid var(--linea);
+  background: linear-gradient(180deg, #121d2b 0%, var(--noche) 100%);
+}
+
+.encabezado__marca {
+  display: flex;
+  align-items: center;
+  gap: var(--e-3);
+}
+
+/* Mini etiqueta de triaje como marca */
+.marca__etiqueta {
+  position: relative;
+  width: 22px;
+  height: 30px;
+  border-radius: 4px;
+  background: var(--critica);
+  box-shadow: 6px 0 0 -2px var(--alta), 12px 0 0 -4px var(--media);
+}
+
+.marca__perforacion {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--noche);
+}
+
+.marca__nombre {
+  font-family: var(--fuente-rotulo);
+  font-weight: 700;
+  font-size: var(--t-lg);
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  margin-left: var(--e-2);
+}
+
+.marca__lugar {
+  margin-left: var(--e-2);
+  color: var(--texto-tenue);
+  font-size: var(--t-sm);
+}
+
+.encabezado__herramientas {
+  display: flex;
+  align-items: center;
+  gap: var(--e-4);
+  flex-wrap: wrap;
+}
+
+.conexion {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-2);
+  font-size: var(--t-sm);
+  color: var(--texto-tenue);
+}
+
+.conexion__punto {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--exito);
+}
+
+.conexion--caida {
+  color: var(--error);
+}
+
+.conexion--caida .conexion__punto {
+  background: var(--error);
+}
+
+.campo-perfil {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--e-2);
+  font-size: var(--t-sm);
+  color: var(--texto-tenue);
+}
+
+.campo-perfil select {
+  min-width: 190px;
+}
+
+/* ------------------------------------------------------------ paneles */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--linea);
+  border-radius: var(--radio-panel);
+  padding: var(--e-4);
+  min-width: 0;
+}
+
+.panel__encabezado {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--e-3);
+  margin-bottom: var(--e-3);
+}
+
+.panel__titulo {
+  font-family: var(--fuente-rotulo);
+  font-size: var(--t-md);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--e-2);
+}
+
+.panel__contador {
+  color: var(--texto-tenue);
+  font-weight: 500;
+}
+
+.panel--cola {
+  padding: var(--e-4) var(--e-4) var(--e-5);
+}
