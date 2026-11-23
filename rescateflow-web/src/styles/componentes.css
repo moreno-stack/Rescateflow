@@ -21,7 +21,7 @@
 }
 
 /* ============================================================ controles */
-.formulario input,
+.formulario input:not([type='checkbox']),
 .formulario select,
 .formulario textarea,
 .filtros input,

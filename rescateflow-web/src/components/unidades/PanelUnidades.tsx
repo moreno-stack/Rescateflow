@@ -63,7 +63,8 @@ export function PanelUnidades() {
                     <span className={`punto-prioridad prioridad-${(u.despachoActivo.prioridadEmergencia ?? 'baja').toLowerCase()}`} aria-hidden="true" />
                     {u.despachoActivo.llegadaEn ? 'Atendiendo' : 'Rumbo a'} {u.despachoActivo.codigoEmergencia}
                     <span className="unidad__tiempo">
-                      desde {tiempoTranscurrido(u.despachoActivo.llegadaEn ?? u.despachoActivo.asignadoEn, ahora).replace('hace ', '')}
+                      {u.despachoActivo.llegadaEn ? 'llegó' : 'asignada'}{' '}
+                      {tiempoTranscurrido(u.despachoActivo.llegadaEn ?? u.despachoActivo.asignadoEn, ahora)}
                     </span>
                   </p>
                 ) : (
