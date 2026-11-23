@@ -1500,11 +1500,18 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "// Preparacion: busca una unidad de BOMBEROS disponible (incompatible con EMERGENCIA_MEDICA, RN-41).",
-                  "pm.sendRequest({ url: `${pm.environment.get('baseUrl')}/unidades?tipo=BOMBEROS&estado=DISPONIBLE`, method: 'GET' }, (err, res) => {",
-                  "    const unidad = !err && res.code === 200 ? res.json().datos[0] : null;",
-                  "    if (unidad) pm.environment.set('unidadIncompatibleId', unidad.id);",
-                  "    else console.error('No hay unidades de BOMBEROS disponibles; ejecute npm run seed');",
+                  "// Preparacion: busca una unidad DISPONIBLE incompatible con EMERGENCIA_MEDICA (RN-41).",
+                  "// Solo AMBULANCIA y RESCATE pueden atenderla, asi que sirve cualquier BOMBEROS o POLICIA libre.",
+                  "pm.environment.unset('unidadIncompatibleId');",
+                  "pm.sendRequest({ url: `${pm.environment.get('baseUrl')}/unidades?estado=DISPONIBLE`, method: 'GET' }, (err, res) => {",
+                  "    const libres = !err && res.code === 200 ? res.json().datos : [];",
+                  "    const unidad = libres.find((u) => u.tipo === 'BOMBEROS') || libres.find((u) => u.tipo === 'POLICIA');",
+                  "    if (unidad) {",
+                  "        pm.environment.set('unidadIncompatibleId', unidad.id);",
+                  "        pm.environment.set('tipoUnidadIncompatible', unidad.tipo);",
+                  "    } else {",
+                  "        console.error('No hay unidades BOMBEROS ni POLICIA disponibles; libere una o ejecute npm run seed');",
+                  "    }",
                   "});"
                 ]
               }
@@ -1533,7 +1540,7 @@
                   "    pm.expect(cuerpo.codigo).to.eql('TIPO_UNIDAD_INCOMPATIBLE');",
                   "});",
                   "pm.test('Detalle con tipos de unidad y emergencia', () => {",
-                  "    pm.expect(cuerpo.detalles.tipoUnidad).to.eql('BOMBEROS');",
+                  "    pm.expect(cuerpo.detalles.tipoUnidad).to.eql(pm.environment.get('tipoUnidadIncompatible'));",
                   "    pm.expect(cuerpo.detalles.tipoEmergencia).to.eql('EMERGENCIA_MEDICA');",
                   "});"
                 ]
@@ -1563,7 +1570,7 @@
                 "asignar-unidad"
               ]
             },
-            "description": "RN-41: una unidad de BOMBEROS no puede atender una EMERGENCIA_MEDICA. El pre-request busca la unidad.",
+            "description": "RN-41: una unidad de BOMBEROS o POLICIA no puede atender una EMERGENCIA_MEDICA. El pre-request busca una unidad incompatible que este DISPONIBLE.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"unidadId\": \"{{unidadIncompatibleId}}\"\n}",
