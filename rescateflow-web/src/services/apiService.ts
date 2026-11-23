@@ -111,8 +111,11 @@ async function solicitar<T>(metodo: Metodo, ruta: string, cuerpo?: unknown, sena
       respuesta.status,
       error.codigo ?? `HTTP_${respuesta.status}`,
       // Sin cuerpo JSON y con 5xx: suele ser el proxy de Vite sin backend detras.
+      // Sin cuerpo JSON y con 404: en el puerto del backend responde OTRO programa.
       error.message ??
-        (respuesta.status >= 500
+        (respuesta.status === 404
+          ? 'En el puerto del backend responde otro programa, no RescateFlow API. Cierre ese programa o cambie el puerto (PUERTO en rescateflow-api/.env y VITE_BACKEND_URL en rescateflow-web/.env).'
+          : respuesta.status >= 500
           ? 'La API no esta disponible. Verifique que el backend este corriendo en el puerto 3000 (npm run dev en rescateflow-api).'
           : `La API respondio ${respuesta.status} ${respuesta.statusText}`),
       error.detalles,
