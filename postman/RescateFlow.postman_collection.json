@@ -1,0 +1,2039 @@
+{
+  "info": {
+    "_postman_id": "7f3c2a10-5e1b-4c8e-9d2a-5c1f0e9b0a05",
+    "name": "RescateFlow API",
+    "description": "Suite de pruebas de RescateFlow API (Fase 5), alineada con el backend de la Fase 3.\n\nRequisitos: backend corriendo en http://localhost:3000 con datos de prueba (npm run seed) y el entorno 'RescateFlow - Local' seleccionado.\n\nEjecute las carpetas en orden (Runner): 1 -> 2 -> 3. Las variables emergenciaId y unidadId se guardan automaticamente.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Unidades",
+      "description": "Consulta de las unidades de respuesta y su estado actual (GET /api/unidades).",
+      "item": [
+        {
+          "name": "1.1 Listar todas las unidades",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Respuesta con total, resumenPorEstado y datos', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('total', 'resumenPorEstado', 'datos');",
+                  "    pm.expect(cuerpo.datos).to.be.an('array');",
+                  "    pm.expect(cuerpo.total).to.eql(cuerpo.datos.length);",
+                  "});",
+                  "pm.test('Cada unidad tiene los campos del contrato', () => {",
+                  "    cuerpo.datos.forEach((u) => {",
+                  "        pm.expect(u).to.include.keys('id', 'codigo', 'nombre', 'tipo', 'estado', 'latitudActual', 'longitudActual', 'despachoActivo');",
+                  "        pm.expect(['AMBULANCIA', 'BOMBEROS', 'POLICIA', 'RESCATE']).to.include(u.tipo);",
+                  "        pm.expect(['DISPONIBLE', 'EN_RUTA', 'OCUPADA', 'FUERA_DE_SERVICIO']).to.include(u.estado);",
+                  "    });",
+                  "});",
+                  "pm.test('Invariante RN-53: EN_RUTA/OCUPADA tienen despacho activo', () => {",
+                  "    cuerpo.datos.forEach((u) => {",
+                  "        const ocupada = u.estado === 'EN_RUTA' || u.estado === 'OCUPADA';",
+                  "        pm.expect(Boolean(u.despachoActivo)).to.eql(ocupada);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/unidades",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "unidades"
+              ]
+            },
+            "description": "Lista todas las unidades con su estado, resumen por estado y despacho activo."
+          },
+          "response": []
+        },
+        {
+          "name": "1.2 Listar unidades disponibles",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Todas las unidades devueltas estan DISPONIBLE', () => {",
+                  "    pm.expect(cuerpo.datos).to.be.an('array');",
+                  "    cuerpo.datos.forEach((u) => pm.expect(u.estado).to.eql('DISPONIBLE'));",
+                  "});",
+                  "pm.test('El filtro aplicado se refleja en la respuesta', () => {",
+                  "    pm.expect(cuerpo.filtros.estado).to.eql('DISPONIBLE');",
+                  "});",
+                  "pm.test('Hay al menos una unidad disponible (ejecute npm run seed si falla)', () => {",
+                  "    pm.expect(cuerpo.total).to.be.above(0);",
+                  "});",
+                  "if (cuerpo.total > 0) {",
+                  "    pm.environment.set('unidadId', cuerpo.datos[0].id);",
+                  "    console.log('unidadId =', cuerpo.datos[0].codigo, cuerpo.datos[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/unidades?estado=DISPONIBLE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "unidades"
+              ],
+              "query": [
+                {
+                  "key": "estado",
+                  "value": "DISPONIBLE",
+                  "description": "DISPONIBLE | EN_RUTA | OCUPADA | FUERA_DE_SERVICIO"
+                }
+              ]
+            },
+            "description": "Filtra por estado=DISPONIBLE y guarda la primera unidad libre en la variable de entorno unidadId."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Emergencias - Flujo Exitoso (Happy Path)",
+      "description": "Ciclo de vida completo: REPORTADA -> VALIDADA -> DESPACHADA -> EN_ATENCION -> CERRADA. Ejecutar en orden.",
+      "item": [
+        {
+          "name": "2.1 Crear emergencia valida",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 201 Created', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Se devuelve id y codigo EMG-AAAA-NNNNNN', () => {",
+                  "    pm.expect(cuerpo.id).to.match(/^[0-9a-f-]{36}$/);",
+                  "    pm.expect(cuerpo.codigo).to.match(/^EMG-\\d{4}-\\d{6}$/);",
+                  "});",
+                  "pm.test('Estado inicial REPORTADA', () => {",
+                  "    pm.expect(cuerpo.estado).to.eql('REPORTADA');",
+                  "});",
+                  "pm.test('Prioridad calculada por el backend: CRITICA con 80 puntos (RN-10 a RN-12)', () => {",
+                  "    pm.expect(cuerpo.prioridad).to.eql('CRITICA');",
+                  "    pm.expect(cuerpo.puntajePrioridad).to.eql(80);",
+                  "});",
+                  "pm.test('Direccion geocodificada con coordenadas', () => {",
+                  "    pm.expect(cuerpo.geocodificada).to.be.true;",
+                  "    pm.expect(cuerpo.latitud).to.be.a('number');",
+                  "    pm.expect(cuerpo.longitud).to.be.a('number');",
+                  "});",
+                  "pm.test('Operador registrado desde X-Usuario-Id', () => {",
+                  "    pm.expect(cuerpo.operadorId).to.eql(pm.environment.get('operadorId'));",
+                  "});",
+                  "pm.test('Encabezado Location apunta al recurso creado', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.eql(`/api/emergencias/${cuerpo.id}`);",
+                  "});",
+                  "pm.test('Incluye advertencias y transiciones permitidas', () => {",
+                  "    pm.expect(cuerpo.advertencias).to.be.an('array');",
+                  "    pm.expect(cuerpo.transicionesPermitidas).to.have.members(['VALIDADA', 'CANCELADA']);",
+                  "});",
+                  "pm.environment.set('emergenciaId', cuerpo.id);",
+                  "pm.environment.set('emergenciaCodigo', cuerpo.codigo);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{operadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias"
+              ]
+            },
+            "description": "Registra una emergencia medica con riesgo vital en Unicentro. El backend la geocodifica y calcula prioridad CRITICA (35 + 45 = 80 puntos). Guarda emergenciaId en el entorno.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"EMERGENCIA_MEDICA\",\n  \"descripcion\": \"Persona inconsciente en la entrada principal\\nMujer de unos 60 anos, no responde y respira con dificultad\",\n  \"direccionReportada\": \"Centro Comercial Unicentro, entrada principal\",\n  \"nombreReportante\": \"Maria Lopez\",\n  \"telefonoReportante\": \"3001234567\",\n  \"numeroAfectados\": 1,\n  \"hayRiesgoVital\": true,\n  \"hayHeridos\": false,\n  \"hayRiesgoPropagacion\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Listar emergencias filtrando por prioridad",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Respuesta con total, filtros y datos', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('total', 'filtros', 'datos');",
+                  "    pm.expect(cuerpo.total).to.eql(cuerpo.datos.length);",
+                  "    pm.expect(cuerpo.filtros.prioridad).to.eql('CRITICA');",
+                  "});",
+                  "pm.test('Todas las emergencias son CRITICA', () => {",
+                  "    cuerpo.datos.forEach((e) => pm.expect(e.prioridad).to.eql('CRITICA'));",
+                  "});",
+                  "pm.test('Incluye la emergencia creada en 2.1', () => {",
+                  "    const ids = cuerpo.datos.map((e) => e.id);",
+                  "    pm.expect(ids).to.include(pm.environment.get('emergenciaId'));",
+                  "});",
+                  "pm.test('Orden de la cola RN-14: mayor puntaje primero', () => {",
+                  "    for (let i = 1; i < cuerpo.datos.length; i++) {",
+                  "        pm.expect(cuerpo.datos[i - 1].puntajePrioridad).to.be.at.least(cuerpo.datos[i].puntajePrioridad);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias?prioridad=CRITICA",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias"
+              ],
+              "query": [
+                {
+                  "key": "prioridad",
+                  "value": "CRITICA",
+                  "description": "CRITICA | ALTA | MEDIA | BAJA"
+                }
+              ]
+            },
+            "description": "Filtra prioridad=CRITICA. Verifica que todas sean criticas y que aparezca la emergencia creada."
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 Listar emergencias filtrando por estado y prioridad",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Todas cumplen ambos filtros', () => {",
+                  "    cuerpo.datos.forEach((e) => {",
+                  "        pm.expect(e.estado).to.eql('REPORTADA');",
+                  "        pm.expect(e.prioridad).to.eql('CRITICA');",
+                  "    });",
+                  "});",
+                  "pm.test('Incluye la emergencia creada en 2.1', () => {",
+                  "    pm.expect(cuerpo.datos.map((e) => e.id)).to.include(pm.environment.get('emergenciaId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias?estado=REPORTADA&prioridad=CRITICA",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias"
+              ],
+              "query": [
+                {
+                  "key": "estado",
+                  "value": "REPORTADA"
+                },
+                {
+                  "key": "prioridad",
+                  "value": "CRITICA"
+                }
+              ]
+            },
+            "description": "Combina estado=REPORTADA y prioridad=CRITICA."
+          },
+          "response": []
+        },
+        {
+          "name": "2.4 Consultar emergencia por ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Devuelve la emergencia solicitada', () => {",
+                  "    pm.expect(cuerpo.id).to.eql(pm.environment.get('emergenciaId'));",
+                  "    pm.expect(cuerpo.codigo).to.eql(pm.environment.get('emergenciaCodigo'));",
+                  "});",
+                  "pm.test('Incluye historial y despachos', () => {",
+                  "    pm.expect(cuerpo.historial).to.be.an('array').with.lengthOf(1);",
+                  "    pm.expect(cuerpo.despachos).to.be.an('array').that.is.empty;",
+                  "});",
+                  "pm.test('Primer registro del historial: null -> REPORTADA', () => {",
+                  "    pm.expect(cuerpo.historial[0].estadoAnterior).to.be.null;",
+                  "    pm.expect(cuerpo.historial[0].estadoNuevo).to.eql('REPORTADA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaId}}"
+              ]
+            },
+            "description": "Detalle con historial de cambios de estado y despachos."
+          },
+          "response": []
+        },
+        {
+          "name": "2.5 Validar emergencia (REPORTADA -> VALIDADA)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Estado VALIDADA con fecha de validacion', () => {",
+                  "    pm.expect(cuerpo.estado).to.eql('VALIDADA');",
+                  "    pm.expect(cuerpo.validadaEn).to.be.a('string');",
+                  "});",
+                  "pm.test('Despachador registrado', () => {",
+                  "    pm.expect(cuerpo.despachadorId).to.eql(pm.environment.get('despachadorId'));",
+                  "});",
+                  "pm.test('Siguientes transiciones: DESPACHADA o CANCELADA', () => {",
+                  "    pm.expect(cuerpo.transicionesPermitidas).to.have.members(['DESPACHADA', 'CANCELADA']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{despachadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaId}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaId}}",
+                "estado"
+              ]
+            },
+            "description": "Transicion T2 de la maquina de estados, realizada por el despachador.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"VALIDADA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.6 Consultar unidades sugeridas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Hay al menos una unidad compatible disponible (ejecute npm run seed si falla)', () => {",
+                  "    pm.expect(cuerpo.total).to.be.above(0);",
+                  "});",
+                  "pm.test('Sugerencias con distancia y tiempo estimado', () => {",
+                  "    cuerpo.datos.forEach((s) => {",
+                  "        pm.expect(s.unidad.estado).to.eql('DISPONIBLE');",
+                  "        pm.expect(['AMBULANCIA', 'RESCATE']).to.include(s.unidad.tipo);",
+                  "        pm.expect(s.distanciaKm).to.be.a('number').and.at.least(0);",
+                  "        pm.expect(s.tiempoEstimadoMin).to.be.a('number').and.at.least(1);",
+                  "    });",
+                  "});",
+                  "if (cuerpo.total > 0) {",
+                  "    pm.environment.set('unidadId', cuerpo.datos[0].unidad.id);",
+                  "    console.log('unidadId =', cuerpo.datos[0].unidad.codigo);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaId}}/unidades-sugeridas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaId}}",
+                "unidades-sugeridas"
+              ]
+            },
+            "description": "Unidades DISPONIBLE y compatibles (RN-40 a RN-42) ordenadas por tipo principal y distancia. Guarda la primera en unidadId."
+          },
+          "response": []
+        },
+        {
+          "name": "2.7 Asignar unidad disponible",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 201 Created', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Emergencia DESPACHADA', () => {",
+                  "    pm.expect(cuerpo.emergencia.id).to.eql(pm.environment.get('emergenciaId'));",
+                  "    pm.expect(cuerpo.emergencia.estado).to.eql('DESPACHADA');",
+                  "    pm.expect(cuerpo.emergencia.despachadaEn).to.be.a('string');",
+                  "});",
+                  "pm.test('Unidad EN_RUTA', () => {",
+                  "    pm.expect(cuerpo.unidad.id).to.eql(pm.environment.get('unidadId'));",
+                  "    pm.expect(cuerpo.unidad.estado).to.eql('EN_RUTA');",
+                  "});",
+                  "pm.test('Despacho ACTIVO con distancia y tiempo estimado', () => {",
+                  "    pm.expect(cuerpo.despacho.estado).to.eql('ACTIVO');",
+                  "    pm.expect(cuerpo.despacho.unidadId).to.eql(pm.environment.get('unidadId'));",
+                  "    pm.expect(cuerpo.despacho.distanciaKm).to.be.a('number');",
+                  "    pm.expect(cuerpo.despacho.tiempoEstimadoMin).to.be.a('number');",
+                  "});",
+                  "pm.test('No es refuerzo (primera unidad)', () => {",
+                  "    pm.expect(cuerpo.esRefuerzo).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{despachadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaId}}/asignar-unidad",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaId}}",
+                "asignar-unidad"
+              ]
+            },
+            "description": "La unidad pasa a EN_RUTA y la emergencia a DESPACHADA. El backend responde 201 Created porque crea un Despacho.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unidadId\": \"{{unidadId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.8 Verificar unidad EN_RUTA",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Unidad EN_RUTA hacia la emergencia', () => {",
+                  "    pm.expect(cuerpo.estado).to.eql('EN_RUTA');",
+                  "    pm.expect(cuerpo.despachoActivo.emergenciaId).to.eql(pm.environment.get('emergenciaId'));",
+                  "});",
+                  "pm.test('Historial de la unidad registra DISPONIBLE -> EN_RUTA', () => {",
+                  "    const ultimo = cuerpo.historial[cuerpo.historial.length - 1];",
+                  "    pm.expect(ultimo.estadoAnterior).to.eql('DISPONIBLE');",
+                  "    pm.expect(ultimo.estadoNuevo).to.eql('EN_RUTA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/unidades/{{unidadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "unidades",
+                "{{unidadId}}"
+              ]
+            },
+            "description": "La unidad asignada queda EN_RUTA con despacho activo hacia la emergencia."
+          },
+          "response": []
+        },
+        {
+          "name": "2.9 Registrar llegada (DESPACHADA -> EN_ATENCION)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Estado EN_ATENCION con fecha', () => {",
+                  "    pm.expect(cuerpo.estado).to.eql('EN_ATENCION');",
+                  "    pm.expect(cuerpo.enAtencionEn).to.be.a('string');",
+                  "});",
+                  "pm.test('Desde EN_ATENCION solo se permite CERRADA', () => {",
+                  "    pm.expect(cuerpo.transicionesPermitidas).to.eql(['CERRADA']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{despachadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaId}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaId}}",
+                "estado"
+              ]
+            },
+            "description": "La unidad llega al sitio: unidad OCUPADA y emergencia EN_ATENCION.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"EN_ATENCION\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.10 Cerrar emergencia (EN_ATENCION -> CERRADA)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Estado CERRADA con fecha y observaciones', () => {",
+                  "    pm.expect(cuerpo.estado).to.eql('CERRADA');",
+                  "    pm.expect(cuerpo.cerradaEn).to.be.a('string');",
+                  "    pm.expect(cuerpo.observacionesCierre).to.include('hospital');",
+                  "});",
+                  "pm.test('CERRADA es un estado final', () => {",
+                  "    pm.expect(cuerpo.transicionesPermitidas).to.be.an('array').that.is.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{despachadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaId}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaId}}",
+                "estado"
+              ]
+            },
+            "description": "Cierre con observaciones obligatorias; los despachos se finalizan y las unidades quedan DISPONIBLE (RN-36).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CERRADA\",\n  \"observacionesCierre\": \"Paciente estabilizada y trasladada al hospital departamental\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2.11 Verificar historial completo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Historial: REPORTADA, VALIDADA, DESPACHADA, EN_ATENCION, CERRADA', () => {",
+                  "    pm.expect(cuerpo.historial.map((h) => h.estadoNuevo)).to.eql(['REPORTADA', 'VALIDADA', 'DESPACHADA', 'EN_ATENCION', 'CERRADA']);",
+                  "});",
+                  "pm.test('Cada cambio guarda el estado anterior', () => {",
+                  "    for (let i = 1; i < cuerpo.historial.length; i++) {",
+                  "        pm.expect(cuerpo.historial[i].estadoAnterior).to.eql(cuerpo.historial[i - 1].estadoNuevo);",
+                  "    }",
+                  "});",
+                  "pm.test('Despacho FINALIZADO con llegada y liberacion', () => {",
+                  "    pm.expect(cuerpo.despachos).to.have.lengthOf(1);",
+                  "    const d = cuerpo.despachos[0];",
+                  "    pm.expect(d.estado).to.eql('FINALIZADO');",
+                  "    pm.expect(d.llegadaEn).to.be.a('string');",
+                  "    pm.expect(d.liberadoEn).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaId}}"
+              ]
+            },
+            "description": "El historial registra las 5 etapas en orden y el despacho queda FINALIZADO."
+          },
+          "response": []
+        },
+        {
+          "name": "2.12 Verificar unidad liberada",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Unidad DISPONIBLE y sin despacho activo', () => {",
+                  "    pm.expect(cuerpo.estado).to.eql('DISPONIBLE');",
+                  "    pm.expect(cuerpo.despachoActivo).to.be.null;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/unidades/{{unidadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "unidades",
+                "{{unidadId}}"
+              ]
+            },
+            "description": "Tras el cierre, la unidad vuelve a DISPONIBLE sin despacho activo."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Casos Negativos y Reglas de Negocio",
+      "description": "Validaciones (400), recursos inexistentes (404), maquina de estados y disponibilidad (409) y reglas de negocio (422). Ejecutar en orden: las peticiones de preparacion crean sus propios datos y la limpieza los elimina.",
+      "item": [
+        {
+          "name": "3.1 Crear emergencia con campos faltantes (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 400 Bad Request', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(400);",
+                  "    pm.expect(cuerpo.error).to.eql('Bad Request');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio VALIDACION_FALLIDA', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('VALIDACION_FALLIDA');",
+                  "});",
+                  "pm.test('Detalla cada campo faltante', () => {",
+                  "    const campos = cuerpo.detalles.map((d) => d.campo);",
+                  "    ['descripcion', 'direccionReportada', 'telefonoReportante', 'numeroAfectados', 'hayRiesgoVital', 'hayHeridos', 'hayRiesgoPropagacion']",
+                  "        .forEach((c) => pm.expect(campos).to.include(c));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias"
+              ]
+            },
+            "description": "Faltan descripcion, direccionReportada, telefonoReportante, numeroAfectados y los booleanos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"INCENDIO\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Crear emergencia con prioridad invalida (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 400 Bad Request', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(400);",
+                  "    pm.expect(cuerpo.error).to.eql('Bad Request');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio VALIDACION_FALLIDA', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('VALIDACION_FALLIDA');",
+                  "});",
+                  "pm.test('Rechaza el campo prioridad (no permitido)', () => {",
+                  "    const textos = cuerpo.detalles.map((d) => d.mensaje).join(' | ');",
+                  "    pm.expect(textos).to.include('prioridad');",
+                  "});",
+                  "pm.test('Rechaza el tipo fuera de la enumeracion', () => {",
+                  "    pm.expect(cuerpo.detalles.map((d) => d.campo)).to.include('tipo');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias"
+              ]
+            },
+            "description": "La prioridad NO se envia: la calcula el backend (RN-10 a RN-13). Enviar 'prioridad' (y ademas un valor inexistente) es rechazado, igual que un tipo fuera de la enumeracion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"TERREMOTO\",\n  \"descripcion\": \"Persona inconsciente en la entrada principal\\nMujer de unos 60 anos, no responde y respira con dificultad\",\n  \"direccionReportada\": \"Centro Comercial Unicentro, entrada principal\",\n  \"nombreReportante\": \"Maria Lopez\",\n  \"telefonoReportante\": \"3001234567\",\n  \"numeroAfectados\": 1,\n  \"hayRiesgoVital\": true,\n  \"hayHeridos\": false,\n  \"hayRiesgoPropagacion\": false,\n  \"prioridad\": \"URGENTISIMA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Crear emergencia con datos fuera de rango (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 400 Bad Request', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(400);",
+                  "    pm.expect(cuerpo.error).to.eql('Bad Request');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio VALIDACION_FALLIDA', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('VALIDACION_FALLIDA');",
+                  "});",
+                  "pm.test('Marca descripcion, telefono y numeroAfectados', () => {",
+                  "    const campos = cuerpo.detalles.map((d) => d.campo);",
+                  "    pm.expect(campos).to.include.members(['descripcion', 'telefonoReportante', 'numeroAfectados']);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias"
+              ]
+            },
+            "description": "Descripcion corta, telefono invalido y afectados negativos (RN-01).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"EMERGENCIA_MEDICA\",\n  \"descripcion\": \"corta\",\n  \"direccionReportada\": \"Centro Comercial Unicentro, entrada principal\",\n  \"nombreReportante\": \"Maria Lopez\",\n  \"telefonoReportante\": \"12ab\",\n  \"numeroAfectados\": -3,\n  \"hayRiesgoVital\": true,\n  \"hayHeridos\": false,\n  \"hayRiesgoPropagacion\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Filtrar con prioridad inexistente (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 400 Bad Request', () => {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(400);",
+                  "    pm.expect(cuerpo.error).to.eql('Bad Request');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio VALIDACION_FALLIDA', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('VALIDACION_FALLIDA');",
+                  "});",
+                  "pm.test('Indica el campo prioridad', () => {",
+                  "    pm.expect(cuerpo.detalles[0].campo).to.eql('prioridad');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias?prioridad=URGENTE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias"
+              ],
+              "query": [
+                {
+                  "key": "prioridad",
+                  "value": "URGENTE"
+                }
+              ]
+            },
+            "description": "El filtro de prioridad solo acepta CRITICA, ALTA, MEDIA o BAJA."
+          },
+          "response": []
+        },
+        {
+          "name": "3.5 Consultar ID inexistente (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 404 Not Found', () => {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(404);",
+                  "    pm.expect(cuerpo.error).to.eql('Not Found');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio RECURSO_NO_ENCONTRADO', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('RECURSO_NO_ENCONTRADO');",
+                  "});",
+                  "pm.test('El mensaje menciona el id buscado', () => {",
+                  "    pm.expect(cuerpo.message).to.include(pm.environment.get('idInexistente'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{idInexistente}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{idInexistente}}"
+              ]
+            },
+            "description": "Un UUID que no existe en la base de datos."
+          },
+          "response": []
+        },
+        {
+          "name": "3.6 Preparacion: crear emergencia para pruebas negativas",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 201 Created', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Emergencia REPORTADA creada', () => {",
+                  "    pm.expect(cuerpo.estado).to.eql('REPORTADA');",
+                  "    pm.expect(cuerpo.latitud).to.be.a('number');",
+                  "});",
+                  "pm.environment.set('emergenciaNegativaId', cuerpo.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{operadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias"
+              ]
+            },
+            "description": "Crea una emergencia REPORTADA propia para no depender de los datos del seed. Guarda emergenciaNegativaId.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo\": \"EMERGENCIA_MEDICA\",\n  \"descripcion\": \"Prueba negativa: persona con dolor toracico\\nCreada por la suite de Postman para probar reglas de negocio\",\n  \"direccionReportada\": \"Plaza de Narino, costado sur\",\n  \"nombreReportante\": null,\n  \"telefonoReportante\": \"3157778899\",\n  \"numeroAfectados\": 1,\n  \"hayRiesgoVital\": false,\n  \"hayHeridos\": true,\n  \"hayRiesgoPropagacion\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.7 Transicion invalida REPORTADA -> CERRADA (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 409 Conflict', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(409);",
+                  "    pm.expect(cuerpo.error).to.eql('Conflict');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio TRANSICION_INVALIDA', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('TRANSICION_INVALIDA');",
+                  "});",
+                  "pm.test('Detalle con estado actual y solicitado', () => {",
+                  "    pm.expect(cuerpo.detalles.estadoActual).to.eql('REPORTADA');",
+                  "    pm.expect(cuerpo.detalles.estadoSolicitado).to.eql('CERRADA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}",
+                "estado"
+              ]
+            },
+            "description": "RN-31: no se puede cerrar una emergencia que no ha sido validada, despachada ni atendida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CERRADA\",\n  \"observacionesCierre\": \"Intento de cierre directo sin atencion\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.8 Asignar unidad a emergencia no validada (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 409 Conflict', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(409);",
+                  "    pm.expect(cuerpo.error).to.eql('Conflict');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio TRANSICION_INVALIDA', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('TRANSICION_INVALIDA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}/asignar-unidad",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}",
+                "asignar-unidad"
+              ]
+            },
+            "description": "RN-31: REPORTADA -> DESPACHADA no esta permitido; primero se valida.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unidadId\": \"{{unidadId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.9 Preparacion: validar emergencia negativa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "pm.test('Estado VALIDADA', () => pm.expect(pm.response.json().estado).to.eql('VALIDADA'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{despachadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}",
+                "estado"
+              ]
+            },
+            "description": "Deja la emergencia de prueba en VALIDADA.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"VALIDADA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.10 Asignar unidad de tipo incompatible (422)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Preparacion: busca una unidad de BOMBEROS disponible (incompatible con EMERGENCIA_MEDICA, RN-41).",
+                  "pm.sendRequest({ url: `${pm.environment.get('baseUrl')}/unidades?tipo=BOMBEROS&estado=DISPONIBLE`, method: 'GET' }, (err, res) => {",
+                  "    const unidad = !err && res.code === 200 ? res.json().datos[0] : null;",
+                  "    if (unidad) pm.environment.set('unidadIncompatibleId', unidad.id);",
+                  "    else console.error('No hay unidades de BOMBEROS disponibles; ejecute npm run seed');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 422 Unprocessable Entity', () => {",
+                  "    pm.response.to.have.status(422);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(422);",
+                  "    pm.expect(cuerpo.error).to.eql('Unprocessable Entity');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio TIPO_UNIDAD_INCOMPATIBLE', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('TIPO_UNIDAD_INCOMPATIBLE');",
+                  "});",
+                  "pm.test('Detalle con tipos de unidad y emergencia', () => {",
+                  "    pm.expect(cuerpo.detalles.tipoUnidad).to.eql('BOMBEROS');",
+                  "    pm.expect(cuerpo.detalles.tipoEmergencia).to.eql('EMERGENCIA_MEDICA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}/asignar-unidad",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}",
+                "asignar-unidad"
+              ]
+            },
+            "description": "RN-41: una unidad de BOMBEROS no puede atender una EMERGENCIA_MEDICA. El pre-request busca la unidad.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unidadId\": \"{{unidadIncompatibleId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.11 Preparacion: asignar unidad (queda EN_RUTA)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Elige la primera unidad compatible disponible para esta emergencia.",
+                  "pm.sendRequest({ url: `${pm.environment.get('baseUrl')}/emergencias/${pm.environment.get('emergenciaNegativaId')}/unidades-sugeridas`, method: 'GET' }, (err, res) => {",
+                  "    const sugerida = !err && res.code === 200 ? res.json().datos[0] : null;",
+                  "    if (sugerida) pm.environment.set('unidadOcupadaId', sugerida.unidad.id);",
+                  "    else console.error('No hay unidades compatibles disponibles; ejecute npm run seed');",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 201 Created', () => {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Unidad EN_RUTA', () => {",
+                  "    pm.expect(cuerpo.unidad.estado).to.eql('EN_RUTA');",
+                  "    pm.expect(cuerpo.unidad.id).to.eql(pm.environment.get('unidadOcupadaId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{despachadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}/asignar-unidad",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}",
+                "asignar-unidad"
+              ]
+            },
+            "description": "Ocupa una unidad compatible para la prueba siguiente. El pre-request elige la primera unidad sugerida y la guarda en unidadOcupadaId.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unidadId\": \"{{unidadOcupadaId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.12 Asignar unidad ocupada / en ruta (409)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Preparacion: crea y valida una SEGUNDA emergencia para intentar asignarle la unidad ya ocupada.",
+                  "const base = pm.environment.get('baseUrl');",
+                  "const cuerpoEmergencia = {",
+                  "    tipo: 'EMERGENCIA_MEDICA',",
+                  "    descripcion: 'Prueba negativa: segunda emergencia\\nSe intenta asignarle una unidad que ya esta en ruta',",
+                  "    direccionReportada: 'Parque Bolivar, entrada principal',",
+                  "    telefonoReportante: '3014445566',",
+                  "    numeroAfectados: 1,",
+                  "    hayRiesgoVital: false,",
+                  "    hayHeridos: true,",
+                  "    hayRiesgoPropagacion: false",
+                  "};",
+                  "pm.sendRequest({",
+                  "    url: `${base}/emergencias`,",
+                  "    method: 'POST',",
+                  "    header: { 'Content-Type': 'application/json' },",
+                  "    body: { mode: 'raw', raw: JSON.stringify(cuerpoEmergencia) }",
+                  "}, (err, res) => {",
+                  "    if (err || res.code !== 201) { console.error('No se pudo crear la segunda emergencia', err || res.text()); return; }",
+                  "    const id = res.json().id;",
+                  "    pm.environment.set('emergenciaNegativa2Id', id);",
+                  "    pm.sendRequest({",
+                  "        url: `${base}/emergencias/${id}/estado`,",
+                  "        method: 'PATCH',",
+                  "        header: { 'Content-Type': 'application/json' },",
+                  "        body: { mode: 'raw', raw: JSON.stringify({ estado: 'VALIDADA' }) }",
+                  "    }, (err2, res2) => {",
+                  "        if (err2 || res2.code !== 200) console.error('No se pudo validar la segunda emergencia', err2 || res2.text());",
+                  "    });",
+                  "});"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 409 Conflict', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(409);",
+                  "    pm.expect(cuerpo.error).to.eql('Conflict');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio UNIDAD_NO_DISPONIBLE', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('UNIDAD_NO_DISPONIBLE');",
+                  "});",
+                  "pm.test('El detalle informa el estado actual EN_RUTA', () => {",
+                  "    pm.expect(cuerpo.detalles.unidadId).to.eql(pm.environment.get('unidadOcupadaId'));",
+                  "    pm.expect(cuerpo.detalles.estadoActual).to.eql('EN_RUTA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{despachadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativa2Id}}/asignar-unidad",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativa2Id}}",
+                "asignar-unidad"
+              ]
+            },
+            "description": "RN-40: la unidad ya esta EN_RUTA en otra emergencia. El pre-request crea y valida una segunda emergencia.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unidadId\": \"{{unidadOcupadaId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.13 Eliminar emergencia despachada (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 409 Conflict', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(409);",
+                  "    pm.expect(cuerpo.error).to.eql('Conflict');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio ELIMINACION_NO_PERMITIDA', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('ELIMINACION_NO_PERMITIDA');",
+                  "});",
+                  "pm.test('Informa el estado actual DESPACHADA', () => {",
+                  "    pm.expect(cuerpo.detalles.estadoActual).to.eql('DESPACHADA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}"
+              ]
+            },
+            "description": "Solo se eliminan emergencias REPORTADA o CANCELADA."
+          },
+          "response": []
+        },
+        {
+          "name": "3.14 Cerrar emergencia despachada sin llegada (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 409 Conflict', () => {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Error con formato uniforme (statusCode, error, message, timestamp)', () => {",
+                  "    pm.expect(cuerpo).to.include.keys('statusCode', 'error', 'message', 'timestamp');",
+                  "    pm.expect(cuerpo.statusCode).to.eql(409);",
+                  "    pm.expect(cuerpo.error).to.eql('Conflict');",
+                  "    pm.expect(cuerpo.message).to.be.a('string').and.not.empty;",
+                  "    pm.expect(Date.parse(cuerpo.timestamp)).to.not.be.NaN;",
+                  "});",
+                  "pm.test('Codigo de negocio TRANSICION_INVALIDA', () => {",
+                  "    pm.expect(cuerpo.codigo).to.eql('TRANSICION_INVALIDA');",
+                  "});",
+                  "pm.test('Explica que primero debe registrarse la llegada', () => {",
+                  "    pm.expect(cuerpo.message).to.include('DESPACHADA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}",
+                "estado"
+              ]
+            },
+            "description": "RN-31: DESPACHADA -> CERRADA no existe; primero debe registrarse la llegada (EN_ATENCION). La maquina de estados responde 409 antes de validar los datos.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CERRADA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.15 Limpieza: cancelar emergencia negativa (libera la unidad)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 200 OK', () => {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "const cuerpo = pm.response.json();",
+                  "pm.test('Estado CANCELADA con motivo', () => {",
+                  "    pm.expect(cuerpo.estado).to.eql('CANCELADA');",
+                  "    pm.expect(cuerpo.motivoCancelacion).to.eql('OTRO');",
+                  "});",
+                  "pm.sendRequest({ url: `${pm.environment.get('baseUrl')}/unidades/${pm.environment.get('unidadOcupadaId')}`, method: 'GET' }, (err, res) => {",
+                  "    pm.test('La unidad ocupada volvio a DISPONIBLE', () => pm.expect(res.json().estado).to.eql('DISPONIBLE'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Usuario-Id",
+                "value": "{{despachadorId}}",
+                "description": "Usuario que actua (auditoria)"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}/estado",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}",
+                "estado"
+              ]
+            },
+            "description": "DESPACHADA -> CANCELADA: el despacho se cancela y la unidad vuelve a DISPONIBLE (RN-36).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"estado\": \"CANCELADA\",\n  \"motivoCancelacion\": \"OTRO\",\n  \"detalleCancelacion\": \"Limpieza de la suite de Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3.16 Limpieza: eliminar emergencia negativa cancelada (204)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Codigo HTTP 204 No Content', () => {",
+                  "    pm.response.to.have.status(204);",
+                  "});",
+                  "const tiempoMaximo = Number(pm.environment.get('tiempoMaximoMs') || 2000);",
+                  "pm.test(`Tiempo de respuesta menor a ${tiempoMaximo} ms`, () => {",
+                  "    pm.expect(pm.response.responseTime).to.be.below(tiempoMaximo);",
+                  "});",
+                  "pm.test('Sin cuerpo de respuesta', () => pm.expect(pm.response.text()).to.eql(''));",
+                  "// Limpieza adicional: cancela y elimina tambien la segunda emergencia de prueba.",
+                  "const base = pm.environment.get('baseUrl');",
+                  "const id2 = pm.environment.get('emergenciaNegativa2Id');",
+                  "if (id2) {",
+                  "    pm.sendRequest({",
+                  "        url: `${base}/emergencias/${id2}/estado`,",
+                  "        method: 'PATCH',",
+                  "        header: { 'Content-Type': 'application/json' },",
+                  "        body: { mode: 'raw', raw: JSON.stringify({ estado: 'CANCELADA', motivoCancelacion: 'OTRO', detalleCancelacion: 'Limpieza de la suite de Postman' }) }",
+                  "    }, () => {",
+                  "        pm.sendRequest({ url: `${base}/emergencias/${id2}`, method: 'DELETE' }, (err, res) => {",
+                  "            pm.test('Limpieza: segunda emergencia eliminada (204)', () => pm.expect(res.code).to.eql(204));",
+                  "        });",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/emergencias/{{emergenciaNegativaId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "emergencias",
+                "{{emergenciaNegativaId}}"
+              ]
+            },
+            "description": "Una emergencia CANCELADA si se puede eliminar. Tambien elimina la segunda emergencia de prueba."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Verificaciones comunes a todas las peticiones de la coleccion",
+          "if (pm.response.code !== 204) {",
+          "    pm.test('[comun] Respuesta en formato JSON', () => {",
+          "        pm.expect(pm.response.headers.get('Content-Type')).to.include('application/json');",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ]
+}
