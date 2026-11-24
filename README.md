@@ -82,13 +82,13 @@ Clases `Emergencia`, `Unidad`, `Despacho`, `Usuario`, `HistorialEstadoEmergencia
 
 ### 4. Vista de Componentes
 
-Frontend (páginas, componentes, hooks, cliente HTTP) y backend en capas: presentación (controladores, DTOs), aplicación (casos de uso), dominio (entidades, servicios, interfaces de repositorio) e infraestructura (repositorios, adaptador de geocodificación). Las dependencias apuntan hacia el dominio.
+Frontend (páginas, componentes, hooks, cliente HTTP) y backend en capas: presentación (controladores, DTOs), aplicación (casos de uso), dominio (entidades, servicios, interfaces de repositorio) e infraestructura (`Mongo*Repositorio`, `ConexionMongo`, `MongoUnidadDeTrabajo` y el adaptador de geocodificación), conectada a MongoDB 8. Las dependencias apuntan hacia el dominio.
 
 ![Vista de componentes](diagramas/04-vista-componentes.png)
 
 ### 5. Vista de Despliegue
 
-Navegador cliente, servidor de aplicaciones con frontend, backend y base de datos, servicios externos y equipo de pruebas, con puertos y protocolos.
+Navegador cliente, servidor de aplicaciones con frontend, backend y base de datos MongoDB 8, servicios externos y equipo de pruebas, con puertos y protocolos.
 
 ![Vista de despliegue](diagramas/05-vista-despliegue.png)
 
