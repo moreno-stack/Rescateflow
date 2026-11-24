@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { after, before, beforeEach, describe, it } from 'node:test';
 import request from 'supertest';
 import type { Express } from 'express';
 import { crearApp } from '../src/app';
 import { cargarConfiguracion } from '../src/config/entorno';
 import { crearContenedor } from '../src/contenedor';
-import { abrirBaseDatos } from '../src/infrastructure/database/conexion';
+import { ConexionMongo } from '../src/infrastructure/database/conexion';
 import { SimuladoGeocodificacionAdapter } from '../src/infrastructure/geocoding/simulado-geocodificacion.adapter';
 import { sembrar } from '../src/infrastructure/seed/seed';
+import { abrirBaseDatosPruebas, cerrarBaseDatosPruebas } from './mongo-pruebas';
 
 // Identificadores fijos generados por el seed
 const INCENDIO_REPORTADA = '20000000-0000-4000-8000-000000000005';
@@ -21,12 +22,21 @@ const RES_01 = '10000000-0000-4000-8000-000000000004';
 const DESPACHADOR = '00000000-0000-4000-8000-000000000003';
 
 let app: Express;
+let conexion: ConexionMongo;
 
-beforeEach(async () => {
-  const db = abrirBaseDatos(':memory:');
-  await sembrar(db);
-  const contenedor = crearContenedor(db, cargarConfiguracion(), { geocodificacion: new SimuladoGeocodificacionAdapter() });
+before(async () => {
+  conexion = await abrirBaseDatosPruebas();
+  const contenedor = crearContenedor(conexion, cargarConfiguracion(), { geocodificacion: new SimuladoGeocodificacionAdapter() });
   app = crearApp(contenedor, { corsOrigen: 'http://localhost:5173', registrarPeticiones: false });
+});
+
+// Cada prueba parte de los mismos datos semilla.
+beforeEach(async () => {
+  await sembrar(conexion);
+});
+
+after(async () => {
+  await cerrarBaseDatosPruebas(conexion);
 });
 
 function assertFormatoError(cuerpo: Record<string, unknown>, statusCode: number): void {
@@ -210,5 +220,52 @@ describe('Errores generales', () => {
   it('JSON mal formado -> 400 JSON_INVALIDO', async () => {
     const res = await request(app).post('/api/emergencias').set('Content-Type', 'application/json').send('{"tipo":').expect(400);
     assert.equal(res.body.codigo, 'JSON_INVALIDO');
+  });
+});
+
+describe('Persistencia MongoDB', () => {
+  it('el validador $jsonSchema rechaza documentos con estados fuera del dominio', async () => {
+    await assert.rejects(
+      conexion.db.collection('emergencias').updateOne({ _id: INCENDIO_REPORTADA as never }, { $set: { estado: 'INVENTADO' } }),
+      (error: { code?: number }) => error.code === 121,
+    );
+  });
+
+  it('el indice unico parcial impide dos despachos ACTIVOS para la misma unidad (RN-53)', async () => {
+    const coleccion = conexion.db.collection('despachos');
+    const activo = await coleccion.findOne({ unidadId: AMB_01, estado: 'ACTIVO' });
+    assert.ok(activo);
+    await assert.rejects(
+      coleccion.insertOne({ ...activo, _id: 'otro-despacho' as never, emergenciaId: MEDICA_VALIDADA }),
+      (error: { code?: number }) => error.code === 11000,
+    );
+  });
+
+  it('dos asignaciones simultaneas de la misma unidad: solo una gana (transaccion + RN-53)', async () => {
+    const nueva = await request(app)
+      .post('/api/emergencias')
+      .send({
+        tipo: 'EMERGENCIA_MEDICA',
+        descripcion: 'Segunda emergencia medica para probar concurrencia',
+        direccionReportada: 'Hospital Departamental de Narino',
+        telefonoReportante: '3001112233',
+        numeroAfectados: 1,
+        hayRiesgoVital: false,
+        hayHeridos: true,
+        hayRiesgoPropagacion: false,
+      })
+      .expect(201);
+    await request(app).patch(`/api/emergencias/${nueva.body.id}/estado`).send({ estado: 'VALIDADA' }).expect(200);
+
+    const [a, b] = await Promise.all([
+      request(app).post(`/api/emergencias/${MEDICA_VALIDADA}/asignar-unidad`).send({ unidadId: RES_01 }),
+      request(app).post(`/api/emergencias/${nueva.body.id}/asignar-unidad`).send({ unidadId: RES_01 }),
+    ]);
+    assert.deepEqual([a.status, b.status].sort(), [201, 409]);
+    const despachosActivos = await conexion.db.collection('despachos').countDocuments({ unidadId: RES_01, estado: 'ACTIVO' });
+    assert.equal(despachosActivos, 1);
+    const perdedora = a.status === 409 ? MEDICA_VALIDADA : nueva.body.id;
+    const estadoPerdedora = await request(app).get(`/api/emergencias/${perdedora}`).expect(200);
+    assert.equal(estadoPerdedora.body.estado, 'VALIDADA');
   });
 });
