@@ -82,22 +82,24 @@ export class EmergenciasServicio {
 
   // ================================================================ consultas
 
-  listar(filtro: FiltroEmergencias): Emergencia[] {
+  listar(filtro: FiltroEmergencias): Promise<Emergencia[]> {
     return this.dep.emergencias.listar(filtro);
   }
 
-  obtenerDetalle(id: string): DetalleEmergencia {
-    const emergencia = this.buscarOFallar(id);
-    const despachos = this.dep.despachos.listarPorEmergencia(id).map((despacho) => ({
-      despacho,
-      unidad: this.dep.unidades.buscarPorId(despacho.unidadId),
-    }));
-    return { emergencia, historial: this.dep.emergencias.listarHistorial(id), despachos };
+  async obtenerDetalle(id: string): Promise<DetalleEmergencia> {
+    const emergencia = await this.buscarOFallar(id);
+    const despachos = await Promise.all(
+      (await this.dep.despachos.listarPorEmergencia(id)).map(async (despacho) => ({
+        despacho,
+        unidad: await this.dep.unidades.buscarPorId(despacho.unidadId),
+      })),
+    );
+    return { emergencia, historial: await this.dep.emergencias.listarHistorial(id), despachos };
   }
 
   /** RN-40 a RN-42: unidades elegibles ordenadas por tipo principal y distancia. */
-  sugerirUnidades(id: string): UnidadSugerida[] {
-    const emergencia = this.buscarOFallar(id);
+  async sugerirUnidades(id: string): Promise<UnidadSugerida[]> {
+    const emergencia = await this.buscarOFallar(id);
     const ubicacion = emergencia.ubicacion;
     if (!ubicacion) {
       throw new ErrorReglaNegocio('EMERGENCIA_SIN_UBICACION', 'La emergencia no tiene coordenadas; no se pueden calcular distancias (RN-24)', {
@@ -105,9 +107,8 @@ export class EmergenciasServicio {
       });
     }
     const ahora = this.dep.tiempo.ahora();
-    const yaAsignadas = new Set(this.dep.despachos.listarActivosPorEmergencia(id).map((d) => d.unidadId));
-    return this.dep.unidades
-      .listar({ estado: EstadoUnidad.DISPONIBLE })
+    const yaAsignadas = new Set((await this.dep.despachos.listarActivosPorEmergencia(id)).map((d) => d.unidadId));
+    return (await this.dep.unidades.listar({ estado: EstadoUnidad.DISPONIBLE }))
       .filter((u) => u.esElegiblePara(emergencia.tipo) && !yaAsignadas.has(u.id))
       .map((unidad) => {
         const distanciaKm = unidad.ubicacionActual.distanciaKmA(ubicacion);
@@ -158,10 +159,10 @@ export class EmergenciasServicio {
       });
     }
 
-    return this.dep.unidadDeTrabajo.ejecutarEnTransaccion(() => {
+    return this.dep.unidadDeTrabajo.ejecutarEnTransaccion(async () => {
       const ahora = this.dep.tiempo.ahora();
       const anio = ahora.getUTCFullYear();
-      const consecutivo = this.dep.emergencias.siguienteConsecutivo(anio);
+      const consecutivo = await this.dep.emergencias.siguienteConsecutivo(anio);
       const codigo = `EMG-${anio}-${String(consecutivo).padStart(6, '0')}`;
 
       const { emergencia, cambio } = Emergencia.registrar(
@@ -187,19 +188,19 @@ export class EmergenciasServicio {
         },
       );
 
-      const posiblesDuplicados = this.detectarDuplicados(emergencia, ahora);
+      const posiblesDuplicados = await this.detectarDuplicados(emergencia, ahora);
       if (posiblesDuplicados.length > 0) advertencias.push('POSIBLE_DUPLICADO');
 
-      this.dep.emergencias.insertar(emergencia);
-      this.registrarHistorialEmergencia(emergencia.id, cambio, usuarioId);
+      await this.dep.emergencias.insertar(emergencia);
+      await this.registrarHistorialEmergencia(emergencia.id, cambio, usuarioId);
       return { emergencia, advertencias, posiblesDuplicados };
     });
   }
 
   /** PATCH /estado: aplica la maquina de estados (RN-30/RN-31) y sus efectos sobre despachos y unidades. */
-  cambiarEstado(id: string, solicitud: SolicitudCambioEstado, usuarioId: string | null): Emergencia {
-    return this.dep.unidadDeTrabajo.ejecutarEnTransaccion(() => {
-      const emergencia = this.buscarOFallar(id);
+  cambiarEstado(id: string, solicitud: SolicitudCambioEstado, usuarioId: string | null): Promise<Emergencia> {
+    return this.dep.unidadDeTrabajo.ejecutarEnTransaccion(async () => {
+      const emergencia = await this.buscarOFallar(id);
       const ahora = this.dep.tiempo.ahora();
       const destino = solicitud.estado;
 
@@ -214,7 +215,7 @@ export class EmergenciasServicio {
               ? { prioridad: solicitud.prioridad, justificacion: solicitud.justificacionPrioridad ?? '' }
               : undefined;
           const cambio = emergencia.validar(usuarioId, ahora, ajuste);
-          this.persistir(emergencia, cambio, usuarioId, solicitud.motivo);
+          await this.persistir(emergencia, cambio, usuarioId, solicitud.motivo);
           break;
         }
 
@@ -228,7 +229,7 @@ export class EmergenciasServicio {
         }
 
         case EstadoEmergencia.EN_ATENCION: {
-          const activos = this.dep.despachos.listarActivosPorEmergencia(id);
+          const activos = await this.dep.despachos.listarActivosPorEmergencia(id);
           const objetivo = solicitud.unidadId ? activos.filter((d) => d.unidadId === solicitud.unidadId) : activos.filter((d) => !d.llegadaEn);
           if (solicitud.unidadId && objetivo.length === 0) {
             throw new ErrorReglaNegocio('UNIDAD_NO_ASIGNADA', 'La unidad indicada no tiene un despacho activo en esta emergencia', {
@@ -238,23 +239,25 @@ export class EmergenciasServicio {
           if (objetivo.length === 0) {
             throw new ErrorConflicto('SIN_DESPACHOS_ACTIVOS', 'La emergencia no tiene unidades en ruta para registrar llegada');
           }
+          const codigosLlegada: string[] = [];
           for (const despacho of objetivo) {
-            const unidad = this.unidadOFallar(despacho.unidadId);
+            const unidad = await this.unidadOFallar(despacho.unidadId);
             despacho.registrarLlegada(ahora);
             const cambioUnidad = unidad.registrarLlegada(ahora, emergencia.codigo);
-            this.dep.despachos.actualizar(despacho);
-            this.persistirUnidad(unidad, cambioUnidad, despacho.id, usuarioId);
+            await this.dep.despachos.actualizar(despacho);
+            await this.persistirUnidad(unidad, cambioUnidad, despacho.id, usuarioId);
+            codigosLlegada.push(unidad.codigo);
           }
-          const codigos = objetivo.map((d) => this.unidadOFallar(d.unidadId).codigo).join(', ');
+          const codigos = codigosLlegada.join(', ');
           const cambio = emergencia.iniciarAtencion(ahora, solicitud.motivo ?? `Llegada al sitio: ${codigos}`);
-          this.persistir(emergencia, cambio, usuarioId);
+          await this.persistir(emergencia, cambio, usuarioId);
           break;
         }
 
         case EstadoEmergencia.CERRADA: {
           const cambio = emergencia.cerrar(solicitud.observacionesCierre ?? '', ahora);
-          this.liberarDespachos(emergencia, 'FINALIZAR', ahora, usuarioId, `Emergencia ${emergencia.codigo} cerrada`);
-          this.persistir(emergencia, cambio, usuarioId);
+          await this.liberarDespachos(emergencia, 'FINALIZAR', ahora, usuarioId, `Emergencia ${emergencia.codigo} cerrada`);
+          await this.persistir(emergencia, cambio, usuarioId);
           break;
         }
 
@@ -263,7 +266,7 @@ export class EmergenciasServicio {
             throw new ErrorValidacion("Cancelar exige 'motivoCancelacion' (RN-38)", { campo: 'motivoCancelacion' });
           }
           if (solicitud.motivoCancelacion === MotivoCancelacion.DUPLICADA && solicitud.emergenciaRelacionadaId) {
-            this.buscarOFallar(solicitud.emergenciaRelacionadaId);
+            await this.buscarOFallar(solicitud.emergenciaRelacionadaId);
           }
           const cambio = emergencia.cancelar(
             solicitud.motivoCancelacion,
@@ -271,8 +274,8 @@ export class EmergenciasServicio {
             solicitud.emergenciaRelacionadaId ?? null,
             ahora,
           );
-          this.liberarDespachos(emergencia, 'CANCELAR', ahora, usuarioId, `Emergencia ${emergencia.codigo} cancelada`);
-          this.persistir(emergencia, cambio, usuarioId);
+          await this.liberarDespachos(emergencia, 'CANCELAR', ahora, usuarioId, `Emergencia ${emergencia.codigo} cancelada`);
+          await this.persistir(emergencia, cambio, usuarioId);
           break;
         }
 
@@ -286,10 +289,10 @@ export class EmergenciasServicio {
   }
 
   /** CU-04: asigna una unidad DISPONIBLE (-> EN_RUTA) y pasa la emergencia a DESPACHADA. */
-  asignarUnidad(id: string, unidadId: string, usuarioId: string | null): ResultadoAsignacion {
-    return this.dep.unidadDeTrabajo.ejecutarEnTransaccion(() => {
-      const emergencia = this.buscarOFallar(id);
-      const unidad = this.unidadOFallar(unidadId);
+  asignarUnidad(id: string, unidadId: string, usuarioId: string | null): Promise<ResultadoAsignacion> {
+    return this.dep.unidadDeTrabajo.ejecutarEnTransaccion(async () => {
+      const emergencia = await this.buscarOFallar(id);
+      const unidad = await this.unidadOFallar(unidadId);
       const ahora = this.dep.tiempo.ahora();
 
       const esRefuerzo = emergencia.estado === EstadoEmergencia.DESPACHADA || emergencia.estado === EstadoEmergencia.EN_ATENCION;
@@ -302,7 +305,7 @@ export class EmergenciasServicio {
           emergenciaId: id,
         });
       }
-      const activos = this.dep.despachos.listarActivosPorEmergencia(id);
+      const activos = await this.dep.despachos.listarActivosPorEmergencia(id);
       if (activos.some((d) => d.unidadId === unidadId)) {
         throw new ErrorConflicto('UNIDAD_YA_ASIGNADA', `La unidad ${unidad.codigo} ya esta asignada a esta emergencia`, { unidadId });
       }
@@ -328,20 +331,20 @@ export class EmergenciasServicio {
       });
       const cambioEmergencia = emergencia.registrarDespacho(ahora);
 
-      this.dep.despachos.insertar(despacho);
-      this.persistirUnidad(unidad, cambioUnidad, despacho.id, usuarioId);
-      this.dep.emergencias.actualizar(emergencia);
+      await this.dep.despachos.insertar(despacho);
+      await this.persistirUnidad(unidad, cambioUnidad, despacho.id, usuarioId);
+      await this.dep.emergencias.actualizar(emergencia);
       if (cambioEmergencia) {
-        this.registrarHistorialEmergencia(emergencia.id, cambioEmergencia, usuarioId, `Unidad ${unidad.codigo} asignada`);
+        await this.registrarHistorialEmergencia(emergencia.id, cambioEmergencia, usuarioId, `Unidad ${unidad.codigo} asignada`);
       }
       return { emergencia, despacho, unidad, esRefuerzo };
     });
   }
 
   /** DELETE: solo REPORTADA o CANCELADA; en otro estado responde 409. */
-  eliminar(id: string): void {
-    this.dep.unidadDeTrabajo.ejecutarEnTransaccion(() => {
-      const emergencia = this.buscarOFallar(id);
+  async eliminar(id: string): Promise<void> {
+    await this.dep.unidadDeTrabajo.ejecutarEnTransaccion(async () => {
+      const emergencia = await this.buscarOFallar(id);
       if (!emergencia.puedeEliminarse()) {
         throw new ErrorConflicto(
           'ELIMINACION_NO_PERMITIDA',
@@ -349,26 +352,26 @@ export class EmergenciasServicio {
           { estadoActual: emergencia.estado, estadosPermitidos: [EstadoEmergencia.REPORTADA, EstadoEmergencia.CANCELADA] },
         );
       }
-      const activos = this.dep.despachos.listarActivosPorEmergencia(id);
+      const activos = await this.dep.despachos.listarActivosPorEmergencia(id);
       if (activos.length > 0) {
         throw new ErrorConflicto('ELIMINACION_NO_PERMITIDA', 'La emergencia aun tiene despachos activos', {
           despachosActivos: activos.length,
         });
       }
-      this.dep.emergencias.eliminar(id);
+      await this.dep.emergencias.eliminar(id);
     });
   }
 
   // ================================================================ auxiliares
 
-  private buscarOFallar(id: string): Emergencia {
-    const emergencia = this.dep.emergencias.buscarPorId(id);
+  private async buscarOFallar(id: string): Promise<Emergencia> {
+    const emergencia = await this.dep.emergencias.buscarPorId(id);
     if (!emergencia) throw new ErrorNoEncontrado('Emergencia', id);
     return emergencia;
   }
 
-  private unidadOFallar(id: string): Unidad {
-    const unidad = this.dep.unidades.buscarPorId(id);
+  private async unidadOFallar(id: string): Promise<Unidad> {
+    const unidad = await this.dep.unidades.buscarPorId(id);
     if (!unidad) throw new ErrorNoEncontrado('Unidad', id);
     return unidad;
   }
@@ -378,43 +381,53 @@ export class EmergenciasServicio {
   }
 
   /** RN-05: misma clase de emergencia, activa, a <= 200 m y registrada hace <= 15 min. */
-  private detectarDuplicados(nueva: Emergencia, ahora: Date): string[] {
+  private async detectarDuplicados(nueva: Emergencia, ahora: Date): Promise<string[]> {
     const ubicacion = nueva.ubicacion;
     if (!ubicacion) return [];
     const desde = new Date(ahora.getTime() - MINUTOS_DUPLICADO * 60000).toISOString();
-    return this.dep.emergencias
-      .listarActivasPorTipoDesde(nueva.tipo, desde)
+    return (await this.dep.emergencias.listarActivasPorTipoDesde(nueva.tipo, desde))
       .filter((otra) => otra.ubicacion !== null && otra.ubicacion.distanciaKmA(ubicacion) <= RADIO_DUPLICADO_KM)
       .map((otra) => otra.codigo);
   }
 
   /** RN-36: al cerrar/cancelar, todos los despachos activos terminan y sus unidades quedan DISPONIBLE. */
-  private liberarDespachos(emergencia: Emergencia, accion: 'FINALIZAR' | 'CANCELAR', ahora: Date, usuarioId: string | null, motivo: string): void {
-    for (const despacho of this.dep.despachos.listarActivosPorEmergencia(emergencia.id)) {
-      const unidad = this.unidadOFallar(despacho.unidadId);
+  private async liberarDespachos(
+    emergencia: Emergencia,
+    accion: 'FINALIZAR' | 'CANCELAR',
+    ahora: Date,
+    usuarioId: string | null,
+    motivo: string,
+  ): Promise<void> {
+    for (const despacho of await this.dep.despachos.listarActivosPorEmergencia(emergencia.id)) {
+      const unidad = await this.unidadOFallar(despacho.unidadId);
       if (accion === 'FINALIZAR') despacho.finalizar(motivo, ahora);
       else despacho.cancelar(motivo, ahora);
-      this.dep.despachos.actualizar(despacho);
+      await this.dep.despachos.actualizar(despacho);
       if (unidad.estado === EstadoUnidad.EN_RUTA || unidad.estado === EstadoUnidad.OCUPADA) {
         const cambio = unidad.liberar(ahora, motivo);
-        this.persistirUnidad(unidad, cambio, despacho.id, usuarioId);
+        await this.persistirUnidad(unidad, cambio, despacho.id, usuarioId);
       }
     }
   }
 
-  private persistir(emergencia: Emergencia, cambio: CambioEstado<EstadoEmergencia>, usuarioId: string | null, motivoExtra?: string): void {
-    this.dep.emergencias.actualizar(emergencia);
-    this.registrarHistorialEmergencia(emergencia.id, cambio, usuarioId, motivoExtra);
+  private async persistir(
+    emergencia: Emergencia,
+    cambio: CambioEstado<EstadoEmergencia>,
+    usuarioId: string | null,
+    motivoExtra?: string,
+  ): Promise<void> {
+    await this.dep.emergencias.actualizar(emergencia);
+    await this.registrarHistorialEmergencia(emergencia.id, cambio, usuarioId, motivoExtra);
   }
 
-  private registrarHistorialEmergencia(
+  private async registrarHistorialEmergencia(
     emergenciaId: string,
     cambio: CambioEstado<EstadoEmergencia>,
     usuarioId: string | null,
     motivoExtra?: string,
-  ): void {
+  ): Promise<void> {
     const motivo = [cambio.motivo, motivoExtra].filter((m): m is string => Boolean(m && m.trim())).join(' | ') || null;
-    this.dep.emergencias.registrarHistorial({
+    await this.dep.emergencias.registrarHistorial({
       id: this.dep.generadorId.nuevoId(),
       emergenciaId,
       estadoAnterior: cambio.estadoAnterior,
@@ -425,8 +438,13 @@ export class EmergenciasServicio {
     });
   }
 
-  private persistirUnidad(unidad: Unidad, cambio: CambioEstado<EstadoUnidad>, despachoId: string | null, usuarioId: string | null): void {
-    this.dep.unidades.actualizar(unidad);
+  private async persistirUnidad(
+    unidad: Unidad,
+    cambio: CambioEstado<EstadoUnidad>,
+    despachoId: string | null,
+    usuarioId: string | null,
+  ): Promise<void> {
+    await this.dep.unidades.actualizar(unidad);
     const entrada: HistorialEstadoUnidad = {
       id: this.dep.generadorId.nuevoId(),
       unidadId: unidad.id,
@@ -437,6 +455,6 @@ export class EmergenciasServicio {
       motivo: cambio.motivo,
       ocurridoEn: cambio.ocurridoEn,
     };
-    this.dep.unidades.registrarHistorial(entrada);
+    await this.dep.unidades.registrarHistorial(entrada);
   }
 }

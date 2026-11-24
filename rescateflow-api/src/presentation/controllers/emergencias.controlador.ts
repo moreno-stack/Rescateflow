@@ -23,22 +23,22 @@ export class EmergenciasControlador {
   ) {}
 
   /** GET /api/emergencias?estado=&prioridad=&tipo= */
-  listar = (_req: Request, res: Response): void => {
+  listar = async (_req: Request, res: Response): Promise<void> => {
     const filtro = res.locals.consulta as FiltroEmergenciasDto;
     const ahora = this.tiempo.ahora();
-    const emergencias = this.servicio.listar(filtro).map((e) => presentarEmergencia(e, ahora));
+    const emergencias = (await this.servicio.listar(filtro)).map((e) => presentarEmergencia(e, ahora));
     res.json({ total: emergencias.length, filtros: filtro, datos: emergencias });
   };
 
   /** GET /api/emergencias/:id (incluye historial de estados y despachos) */
-  obtener = (req: Request<ParamsId>, res: Response): void => {
-    const detalle = this.servicio.obtenerDetalle(req.params.id);
+  obtener = async (req: Request<ParamsId>, res: Response): Promise<void> => {
+    const detalle = await this.servicio.obtenerDetalle(req.params.id);
     res.json(presentarDetalleEmergencia(detalle, this.tiempo.ahora()));
   };
 
   /** GET /api/emergencias/:id/unidades-sugeridas */
-  unidadesSugeridas = (req: Request<ParamsId>, res: Response): void => {
-    const sugerencias = this.servicio.sugerirUnidades(req.params.id).map(presentarSugerencia);
+  unidadesSugeridas = async (req: Request<ParamsId>, res: Response): Promise<void> => {
+    const sugerencias = (await this.servicio.sugerirUnidades(req.params.id)).map(presentarSugerencia);
     res.json({
       total: sugerencias.length,
       motivo: sugerencias.length === 0 ? 'SIN_UNIDADES_DISPONIBLES' : null,
@@ -76,16 +76,16 @@ export class EmergenciasControlador {
   };
 
   /** PATCH /api/emergencias/:id/estado */
-  cambiarEstado = (req: Request<ParamsId>, res: Response): void => {
+  cambiarEstado = async (req: Request<ParamsId>, res: Response): Promise<void> => {
     const dto = res.locals.cuerpo as CambiarEstadoDto;
-    const emergencia = this.servicio.cambiarEstado(req.params.id, dto, res.locals.usuarioId as string | null);
+    const emergencia = await this.servicio.cambiarEstado(req.params.id, dto, res.locals.usuarioId as string | null);
     res.json(presentarEmergencia(emergencia, this.tiempo.ahora()));
   };
 
   /** POST /api/emergencias/:id/asignar-unidad */
-  asignarUnidad = (req: Request<ParamsId>, res: Response): void => {
+  asignarUnidad = async (req: Request<ParamsId>, res: Response): Promise<void> => {
     const dto = res.locals.cuerpo as AsignarUnidadDto;
-    const resultado = this.servicio.asignarUnidad(req.params.id, dto.unidadId, res.locals.usuarioId as string | null);
+    const resultado = await this.servicio.asignarUnidad(req.params.id, dto.unidadId, res.locals.usuarioId as string | null);
     res.status(201).json({
       mensaje: resultado.esRefuerzo
         ? `Unidad ${resultado.unidad.codigo} asignada como refuerzo`
@@ -98,8 +98,8 @@ export class EmergenciasControlador {
   };
 
   /** DELETE /api/emergencias/:id */
-  eliminar = (req: Request<ParamsId>, res: Response): void => {
-    this.servicio.eliminar(req.params.id);
+  eliminar = async (req: Request<ParamsId>, res: Response): Promise<void> => {
+    await this.servicio.eliminar(req.params.id);
     res.status(204).send();
   };
 }

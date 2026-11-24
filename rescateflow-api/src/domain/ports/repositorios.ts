@@ -7,9 +7,8 @@ import { EstadoEmergencia, EstadoUnidad, NivelPrioridad, TipoEmergencia, TipoUni
 
 /**
  * Puertos de persistencia (patron Repository, Fase 1 seccion 6.4).
- * El dominio y la aplicacion dependen de estas interfaces, nunca de SQLite.
- * Son sincronicas porque la implementacion actual (better-sqlite3) lo es y asi
- * las transacciones de UnidadDeTrabajo son atomicas sin intercalado de peticiones.
+ * El dominio y la aplicacion dependen de estas interfaces, nunca de MongoDB.
+ * Son asincronas (Promise) porque el acceso a la base de datos es por red.
  */
 
 export interface FiltroEmergencias {
@@ -19,17 +18,17 @@ export interface FiltroEmergencias {
 }
 
 export interface EmergenciaRepositorio {
-  buscarPorId(id: string): Emergencia | null;
-  listar(filtro: FiltroEmergencias): Emergencia[];
+  buscarPorId(id: string): Promise<Emergencia | null>;
+  listar(filtro: FiltroEmergencias): Promise<Emergencia[]>;
   /** Emergencias activas del mismo tipo registradas desde la fecha dada (RN-05). */
-  listarActivasPorTipoDesde(tipo: TipoEmergencia, desde: string): Emergencia[];
-  insertar(emergencia: Emergencia): void;
+  listarActivasPorTipoDesde(tipo: TipoEmergencia, desde: string): Promise<Emergencia[]>;
+  insertar(emergencia: Emergencia): Promise<void>;
   /** Actualiza con bloqueo optimista (RN-33); lanza CONFLICTO_VERSION si la version cambio. */
-  actualizar(emergencia: Emergencia): void;
-  eliminar(id: string): void;
-  siguienteConsecutivo(anio: number): number;
-  registrarHistorial(entrada: HistorialEstadoEmergencia): void;
-  listarHistorial(emergenciaId: string): HistorialEstadoEmergencia[];
+  actualizar(emergencia: Emergencia): Promise<void>;
+  eliminar(id: string): Promise<void>;
+  siguienteConsecutivo(anio: number): Promise<number>;
+  registrarHistorial(entrada: HistorialEstadoEmergencia): Promise<void>;
+  listarHistorial(emergenciaId: string): Promise<HistorialEstadoEmergencia[]>;
 }
 
 export interface FiltroUnidades {
@@ -38,31 +37,31 @@ export interface FiltroUnidades {
 }
 
 export interface UnidadRepositorio {
-  buscarPorId(id: string): Unidad | null;
-  buscarPorCodigo(codigo: string): Unidad | null;
-  listar(filtro: FiltroUnidades): Unidad[];
-  insertar(unidad: Unidad): void;
-  actualizar(unidad: Unidad): void;
-  registrarHistorial(entrada: HistorialEstadoUnidad): void;
-  listarHistorial(unidadId: string): HistorialEstadoUnidad[];
+  buscarPorId(id: string): Promise<Unidad | null>;
+  buscarPorCodigo(codigo: string): Promise<Unidad | null>;
+  listar(filtro: FiltroUnidades): Promise<Unidad[]>;
+  insertar(unidad: Unidad): Promise<void>;
+  actualizar(unidad: Unidad): Promise<void>;
+  registrarHistorial(entrada: HistorialEstadoUnidad): Promise<void>;
+  listarHistorial(unidadId: string): Promise<HistorialEstadoUnidad[]>;
 }
 
 export interface DespachoRepositorio {
-  buscarPorId(id: string): Despacho | null;
-  listarPorEmergencia(emergenciaId: string): Despacho[];
-  listarActivosPorEmergencia(emergenciaId: string): Despacho[];
-  buscarActivoPorUnidad(unidadId: string): Despacho | null;
-  insertar(despacho: Despacho): void;
-  actualizar(despacho: Despacho): void;
+  buscarPorId(id: string): Promise<Despacho | null>;
+  listarPorEmergencia(emergenciaId: string): Promise<Despacho[]>;
+  listarActivosPorEmergencia(emergenciaId: string): Promise<Despacho[]>;
+  buscarActivoPorUnidad(unidadId: string): Promise<Despacho | null>;
+  insertar(despacho: Despacho): Promise<void>;
+  actualizar(despacho: Despacho): Promise<void>;
 }
 
 export interface UsuarioRepositorio {
-  buscarPorId(id: string): Usuario | null;
-  insertar(usuario: Usuario): void;
-  listar(): Usuario[];
+  buscarPorId(id: string): Promise<Usuario | null>;
+  insertar(usuario: Usuario): Promise<void>;
+  listar(): Promise<Usuario[]>;
 }
 
 /** Ejecuta una funcion de forma atomica (todo o nada). */
 export interface UnidadDeTrabajo {
-  ejecutarEnTransaccion<T>(trabajo: () => T): T;
+  ejecutarEnTransaccion<T>(trabajo: () => Promise<T>): Promise<T>;
 }

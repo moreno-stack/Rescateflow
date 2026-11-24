@@ -3,7 +3,8 @@ import { crearContenedor } from '../../contenedor';
 import { Ubicacion } from '../../domain/entities/ubicacion';
 import { Unidad } from '../../domain/entities/unidad';
 import { GeneradorId } from '../../domain/ports/proveedores';
-import { abrirBaseDatos, BaseDatos, vaciarBaseDatos } from '../database/conexion';
+import { ConexionMongo, conectarBaseDatos } from '../database/conexion';
+import { vaciarColecciones } from '../database/esquema';
 import { SimuladoGeocodificacionAdapter } from '../geocoding/simulado-geocodificacion.adapter';
 import { ID_AMB_01, ID_DESPACHADOR, ID_OPERADOR, ID_POL_01, UNIDADES_SEMILLA, USUARIOS_SEMILLA } from './datos-semilla';
 
@@ -25,11 +26,11 @@ class GeneradorIdDeterminista implements GeneradorId {
  * Las emergencias se crean con los MISMOS servicios de aplicacion que usa la API,
  * por lo que respetan la maquina de estados y dejan su historial completo.
  */
-export async function sembrar(db: BaseDatos): Promise<void> {
+export async function sembrar(conexion: ConexionMongo): Promise<void> {
   const config = cargarConfiguracion();
-  vaciarBaseDatos(db);
+  await vaciarColecciones(conexion.db);
 
-  const contenedor = crearContenedor(db, config, {
+  const contenedor = crearContenedor(conexion, config, {
     geocodificacion: new SimuladoGeocodificacionAdapter(),
     generadorId: new GeneradorIdDeterminista('20000000'),
   });
@@ -39,11 +40,11 @@ export async function sembrar(db: BaseDatos): Promise<void> {
 
   // ---- Usuarios
   for (const u of USUARIOS_SEMILLA) {
-    dep.usuarios.insertar({ ...u, activo: true, creadoEn: ahoraIso, actualizadoEn: ahoraIso });
+    await dep.usuarios.insertar({ ...u, activo: true, creadoEn: ahoraIso, actualizadoEn: ahoraIso });
   }
 
   // ---- 4 unidades de respuesta
-  dep.unidadDeTrabajo.ejecutarEnTransaccion(() => {
+  await dep.unidadDeTrabajo.ejecutarEnTransaccion(async () => {
     for (const datos of UNIDADES_SEMILLA) {
       const { unidad, cambio } = Unidad.crear({
         id: datos.id,
@@ -55,8 +56,8 @@ export async function sembrar(db: BaseDatos): Promise<void> {
         usuarioResponsableId: datos.usuarioResponsableId,
         ahora,
       });
-      dep.unidades.insertar(unidad);
-      dep.unidades.registrarHistorial({
+      await dep.unidades.insertar(unidad);
+      await dep.unidades.registrarHistorial({
         id: dep.generadorId.nuevoId(),
         unidadId: unidad.id,
         estadoAnterior: cambio.estadoAnterior,
@@ -101,7 +102,7 @@ export async function sembrar(db: BaseDatos): Promise<void> {
     },
     ID_OPERADOR,
   );
-  servicio.cambiarEstado(medica.emergencia.id, { estado: 'VALIDADA' }, ID_DESPACHADOR);
+  await servicio.cambiarEstado(medica.emergencia.id, { estado: 'VALIDADA' }, ID_DESPACHADOR);
 
   // 3) ACCIDENTE_TRANSITO con heridos: ALTA, queda DESPACHADA con AMB-01 EN_RUTA
   const accidente = await servicio.registrar(
@@ -118,8 +119,8 @@ export async function sembrar(db: BaseDatos): Promise<void> {
     },
     ID_OPERADOR,
   );
-  servicio.cambiarEstado(accidente.emergencia.id, { estado: 'VALIDADA' }, ID_DESPACHADOR);
-  servicio.asignarUnidad(accidente.emergencia.id, ID_AMB_01, ID_DESPACHADOR);
+  await servicio.cambiarEstado(accidente.emergencia.id, { estado: 'VALIDADA' }, ID_DESPACHADOR);
+  await servicio.asignarUnidad(accidente.emergencia.id, ID_AMB_01, ID_DESPACHADOR);
 
   // 4) SEGURIDAD: MEDIA, ciclo completo hasta CERRADA (POL-01 vuelve a DISPONIBLE)
   const rina = await servicio.registrar(
@@ -136,10 +137,10 @@ export async function sembrar(db: BaseDatos): Promise<void> {
     },
     ID_OPERADOR,
   );
-  servicio.cambiarEstado(rina.emergencia.id, { estado: 'VALIDADA' }, ID_DESPACHADOR);
-  servicio.asignarUnidad(rina.emergencia.id, ID_POL_01, ID_DESPACHADOR);
-  servicio.cambiarEstado(rina.emergencia.id, { estado: 'EN_ATENCION' }, ID_DESPACHADOR);
-  servicio.cambiarEstado(
+  await servicio.cambiarEstado(rina.emergencia.id, { estado: 'VALIDADA' }, ID_DESPACHADOR);
+  await servicio.asignarUnidad(rina.emergencia.id, ID_POL_01, ID_DESPACHADOR);
+  await servicio.cambiarEstado(rina.emergencia.id, { estado: 'EN_ATENCION' }, ID_DESPACHADOR);
+  await servicio.cambiarEstado(
     rina.emergencia.id,
     { estado: 'CERRADA', observacionesCierre: 'Situacion controlada por la patrulla; sin lesionados ni capturas' },
     ID_DESPACHADOR,
@@ -160,7 +161,7 @@ export async function sembrar(db: BaseDatos): Promise<void> {
     },
     ID_OPERADOR,
   );
-  servicio.cambiarEstado(
+  await servicio.cambiarEstado(
     falsa.emergencia.id,
     { estado: 'CANCELADA', motivoCancelacion: 'FALSA_ALARMA', detalleCancelacion: 'El propietario regreso por la maleta' },
     ID_OPERADOR,
@@ -168,32 +169,33 @@ export async function sembrar(db: BaseDatos): Promise<void> {
 }
 
 /** Imprime un resumen de lo sembrado. */
-function imprimirResumen(db: BaseDatos): void {
-  const emergencias = db
-    .prepare('SELECT id, codigo, tipo, prioridad, puntaje_prioridad AS puntaje, estado FROM emergencias ORDER BY codigo')
-    .all();
-  const unidades = db.prepare('SELECT id, codigo, tipo, estado FROM unidades ORDER BY codigo').all();
+async function imprimirResumen(conexion: ConexionMongo): Promise<void> {
+  const contenedor = crearContenedor(conexion, cargarConfiguracion());
+  const emergencias = await contenedor.dependencias.emergencias.listar({});
+  const unidades = await contenedor.dependencias.unidades.listar({});
   console.log('\nEmergencias precargadas:');
-  console.table(emergencias);
+  console.table(
+    emergencias.map((e) => ({ id: e.id, codigo: e.codigo, tipo: e.tipo, prioridad: e.prioridad, puntaje: e.puntajePrioridad, estado: e.estado })),
+  );
   console.log('Unidades precargadas:');
-  console.table(unidades);
+  console.table(unidades.map((u) => ({ id: u.id, codigo: u.codigo, tipo: u.tipo, estado: u.estado })));
 }
 
 async function principal(): Promise<void> {
   const config = cargarConfiguracion();
-  const db = abrirBaseDatos(config.rutaBaseDatos);
+  const conexion = await conectarBaseDatos(config.mongodbUri, config.mongodbBaseDatos);
   try {
-    await sembrar(db);
-    imprimirResumen(db);
-    console.log(`Seed completado en ${config.rutaBaseDatos}`);
+    await sembrar(conexion);
+    await imprimirResumen(conexion);
+    console.log(`Seed completado en ${config.mongodbUri}/${config.mongodbBaseDatos}`);
   } finally {
-    db.close();
+    await conexion.cerrar();
   }
 }
 
 if (require.main === module) {
   principal().catch((error: unknown) => {
-    console.error('Error ejecutando el seed:', error);
+    console.error('Error ejecutando el seed:', error instanceof Error ? error.message : error);
     process.exit(1);
   });
 }

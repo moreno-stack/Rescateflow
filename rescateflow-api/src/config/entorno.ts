@@ -15,7 +15,8 @@ export type ProveedorGeocodificacion = 'SIMULADO' | 'NOMINATIM';
 
 export interface Configuracion {
   puerto: number;
-  rutaBaseDatos: string;
+  mongodbUri: string;
+  mongodbBaseDatos: string;
   proveedorGeocodificacion: ProveedorGeocodificacion;
   areaCobertura: AreaCobertura;
   velocidadPromedioKmH: number;
@@ -56,7 +57,9 @@ function leerProveedor(valor: string | undefined): ProveedorGeocodificacion {
 export function cargarConfiguracion(): Configuracion {
   return {
     puerto: leerNumero('PUERTO', 3000),
-    rutaBaseDatos: process.env.RUTA_BASE_DATOS?.trim() || './data/rescateflow.db',
+    // 127.0.0.1 (no 'localhost') evita que Node intente IPv6 (::1) en Windows, donde mongod no escucha por defecto.
+    mongodbUri: process.env.MONGODB_URI?.trim() || 'mongodb://127.0.0.1:27017',
+    mongodbBaseDatos: process.env.MONGODB_BASE_DATOS?.trim() || 'rescateflow',
     proveedorGeocodificacion: leerProveedor(process.env.GEOCODIFICACION_PROVEEDOR),
     areaCobertura: leerArea(process.env.AREA_COBERTURA),
     velocidadPromedioKmH: leerNumero('VELOCIDAD_PROMEDIO_KMH', 30),

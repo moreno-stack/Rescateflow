@@ -4,15 +4,15 @@ import { UnidadesServicio } from './application/services/unidades.servicio';
 import { Configuracion } from './config/entorno';
 import { GeneradorId, ProveedorTiempo } from './domain/ports/proveedores';
 import { ServicioGeocodificacion } from './domain/ports/servicio-geocodificacion';
-import { BaseDatos } from './infrastructure/database/conexion';
+import { ConexionMongo } from './infrastructure/database/conexion';
 import { NominatimGeocodificacionAdapter } from './infrastructure/geocoding/nominatim-geocodificacion.adapter';
 import { SimuladoGeocodificacionAdapter } from './infrastructure/geocoding/simulado-geocodificacion.adapter';
 import { GeneradorIdUuid, ProveedorTiempoSistema } from './infrastructure/providers/proveedores-sistema';
-import { SqliteDespachoRepositorio } from './infrastructure/repositories/sqlite-despacho.repositorio';
-import { SqliteEmergenciaRepositorio } from './infrastructure/repositories/sqlite-emergencia.repositorio';
-import { SqliteUnidadDeTrabajo } from './infrastructure/repositories/sqlite-unidad-de-trabajo';
-import { SqliteUnidadRepositorio } from './infrastructure/repositories/sqlite-unidad.repositorio';
-import { SqliteUsuarioRepositorio } from './infrastructure/repositories/sqlite-usuario.repositorio';
+import { MongoDespachoRepositorio } from './infrastructure/repositories/mongo-despacho.repositorio';
+import { MongoEmergenciaRepositorio } from './infrastructure/repositories/mongo-emergencia.repositorio';
+import { MongoUnidadDeTrabajo } from './infrastructure/repositories/mongo-unidad-de-trabajo';
+import { MongoUnidadRepositorio } from './infrastructure/repositories/mongo-unidad.repositorio';
+import { MongoUsuarioRepositorio } from './infrastructure/repositories/mongo-usuario.repositorio';
 
 export interface Contenedor {
   dependencias: DependenciasAplicacion;
@@ -28,9 +28,9 @@ export interface Reemplazos {
 
 /**
  * Raiz de composicion: el unico lugar que conoce las implementaciones concretas.
- * Cambiar SQLite por otra base o Nominatim por otro proveedor solo toca este archivo.
+ * Cambiar MongoDB por otra base o Nominatim por otro proveedor solo toca este archivo.
  */
-export function crearContenedor(db: BaseDatos, config: Configuracion, reemplazos: Reemplazos = {}): Contenedor {
+export function crearContenedor(conexion: ConexionMongo, config: Configuracion, reemplazos: Reemplazos = {}): Contenedor {
   const geocodificacion =
     reemplazos.geocodificacion ??
     (config.proveedorGeocodificacion === 'NOMINATIM'
@@ -38,11 +38,11 @@ export function crearContenedor(db: BaseDatos, config: Configuracion, reemplazos
       : new SimuladoGeocodificacionAdapter());
 
   const dependencias: DependenciasAplicacion = {
-    emergencias: new SqliteEmergenciaRepositorio(db),
-    unidades: new SqliteUnidadRepositorio(db),
-    despachos: new SqliteDespachoRepositorio(db),
-    usuarios: new SqliteUsuarioRepositorio(db),
-    unidadDeTrabajo: new SqliteUnidadDeTrabajo(db),
+    emergencias: new MongoEmergenciaRepositorio(conexion.db),
+    unidades: new MongoUnidadRepositorio(conexion.db),
+    despachos: new MongoDespachoRepositorio(conexion.db),
+    usuarios: new MongoUsuarioRepositorio(conexion.db),
+    unidadDeTrabajo: new MongoUnidadDeTrabajo(conexion),
     geocodificacion,
     tiempo: reemplazos.tiempo ?? new ProveedorTiempoSistema(),
     generadorId: reemplazos.generadorId ?? new GeneradorIdUuid(),

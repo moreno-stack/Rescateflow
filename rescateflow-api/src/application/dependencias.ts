@@ -11,7 +11,7 @@ import { ServicioGeocodificacion } from '../domain/ports/servicio-geocodificacio
 
 /**
  * Dependencias que reciben los servicios de aplicacion. Todas son interfaces (puertos):
- * la capa de aplicacion nunca conoce SQLite, Express ni Nominatim (bajo acoplamiento).
+ * la capa de aplicacion nunca conoce MongoDB, Express ni Nominatim (bajo acoplamiento).
  */
 export interface DependenciasAplicacion {
   emergencias: EmergenciaRepositorio;

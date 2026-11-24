@@ -1,130 +1,176 @@
+import { Db, Document, IndexDescription } from 'mongodb';
+import {
+  EstadoDespacho,
+  EstadoEmergencia,
+  EstadoUnidad,
+  FuenteUbicacion,
+  MotivoCancelacion,
+  NivelPrioridad,
+  RolUsuario,
+  TipoEmergencia,
+  TipoUnidad,
+} from '../../domain/enums';
+
 /**
- * Esquema SQLite de RescateFlow (diccionario de datos, Fase 1 seccion 7.4).
- * Tablas en plural y snake_case; enumeraciones protegidas con CHECK.
+ * Esquema de la base de datos MongoDB de RescateFlow (diccionario de datos, Fase 1 seccion 7.4).
+ * Cada coleccion lleva un validador $jsonSchema (equivalente a los CHECK de SQL) y sus indices.
+ * Las coordenadas se guardan como GeoJSON Point [longitud, latitud] con indice 2dsphere.
  */
-export const ESQUEMA_SQL = `
-CREATE TABLE IF NOT EXISTS usuarios (
-  id               TEXT PRIMARY KEY,
-  nombre_completo  TEXT NOT NULL,
-  correo           TEXT NOT NULL UNIQUE,
-  rol              TEXT NOT NULL CHECK (rol IN ('OPERADOR','DESPACHADOR','UNIDAD','ADMINISTRADOR')),
-  activo           INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0,1)),
-  creado_en        TEXT NOT NULL,
-  actualizado_en   TEXT NOT NULL
-);
+export const COLECCIONES = {
+  usuarios: 'usuarios',
+  unidades: 'unidades',
+  emergencias: 'emergencias',
+  despachos: 'despachos',
+  historialEmergencias: 'historial_estados_emergencia',
+  historialUnidades: 'historial_estados_unidad',
+} as const;
 
-CREATE TABLE IF NOT EXISTS unidades (
-  id                        TEXT PRIMARY KEY,
-  codigo                    TEXT NOT NULL UNIQUE,
-  nombre                    TEXT NOT NULL,
-  tipo                      TEXT NOT NULL CHECK (tipo IN ('AMBULANCIA','BOMBEROS','POLICIA','RESCATE')),
-  estado                    TEXT NOT NULL CHECK (estado IN ('DISPONIBLE','EN_RUTA','OCUPADA','FUERA_DE_SERVICIO')),
-  activa                    INTEGER NOT NULL DEFAULT 1 CHECK (activa IN (0,1)),
-  base_nombre               TEXT NOT NULL,
-  latitud_base              REAL NOT NULL,
-  longitud_base             REAL NOT NULL,
-  latitud_actual            REAL NOT NULL,
-  longitud_actual           REAL NOT NULL,
-  ubicacion_actualizada_en  TEXT NOT NULL,
-  motivo_estado             TEXT,
-  usuario_responsable_id    TEXT UNIQUE REFERENCES usuarios(id) ON DELETE SET NULL,
-  creado_en                 TEXT NOT NULL,
-  actualizado_en            TEXT NOT NULL,
-  version                   INTEGER NOT NULL DEFAULT 1
-);
+const texto = { bsonType: 'string' };
+const textoONulo = { bsonType: ['string', 'null'] };
+const enumeracion = (valores: Record<string, string>) => ({ enum: Object.values(valores) });
+const enumeracionONula = (valores: Record<string, string>) => ({ enum: [...Object.values(valores), null] });
+const punto = {
+  bsonType: 'object',
+  required: ['type', 'coordinates'],
+  properties: {
+    type: { enum: ['Point'] },
+    coordinates: { bsonType: 'array', minItems: 2, maxItems: 2, items: { bsonType: ['double', 'int'] } },
+  },
+};
 
-CREATE TABLE IF NOT EXISTS emergencias (
-  id                              TEXT PRIMARY KEY,
-  codigo                          TEXT NOT NULL UNIQUE,
-  tipo                            TEXT NOT NULL CHECK (tipo IN ('INCENDIO','MATERIALES_PELIGROSOS','EMERGENCIA_MEDICA','DESASTRE_NATURAL','ACCIDENTE_TRANSITO','SEGURIDAD','OTRO')),
-  descripcion                     TEXT NOT NULL,
-  direccion_reportada             TEXT NOT NULL,
-  direccion_normalizada           TEXT,
-  latitud                         REAL,
-  longitud                        REAL,
-  geocodificada                   INTEGER NOT NULL DEFAULT 0 CHECK (geocodificada IN (0,1)),
-  fuente_ubicacion                TEXT CHECK (fuente_ubicacion IN ('GEOCODIFICACION','MANUAL')),
-  nombre_reportante               TEXT,
-  telefono_reportante             TEXT NOT NULL,
-  numero_afectados                INTEGER NOT NULL CHECK (numero_afectados BETWEEN 0 AND 500),
-  hay_riesgo_vital                INTEGER NOT NULL CHECK (hay_riesgo_vital IN (0,1)),
-  hay_heridos                     INTEGER NOT NULL CHECK (hay_heridos IN (0,1)),
-  hay_riesgo_propagacion          INTEGER NOT NULL CHECK (hay_riesgo_propagacion IN (0,1)),
-  puntaje_prioridad               INTEGER NOT NULL CHECK (puntaje_prioridad BETWEEN 0 AND 100),
-  prioridad                       TEXT NOT NULL CHECK (prioridad IN ('CRITICA','ALTA','MEDIA','BAJA')),
-  prioridad_ajustada_manualmente  INTEGER NOT NULL DEFAULT 0 CHECK (prioridad_ajustada_manualmente IN (0,1)),
-  justificacion_prioridad         TEXT,
-  estado                          TEXT NOT NULL CHECK (estado IN ('REPORTADA','VALIDADA','DESPACHADA','EN_ATENCION','CERRADA','CANCELADA')),
-  motivo_cancelacion              TEXT CHECK (motivo_cancelacion IN ('FALSA_ALARMA','DUPLICADA','RESUELTA_SIN_INTERVENCION','FUERA_DE_JURISDICCION','OTRO')),
-  detalle_cancelacion             TEXT,
-  emergencia_relacionada_id       TEXT REFERENCES emergencias(id) ON DELETE SET NULL,
-  observaciones_cierre            TEXT,
-  operador_id                     TEXT REFERENCES usuarios(id) ON DELETE SET NULL,
-  despachador_id                  TEXT REFERENCES usuarios(id) ON DELETE SET NULL,
-  reportada_en                    TEXT NOT NULL,
-  validada_en                     TEXT,
-  despachada_en                   TEXT,
-  en_atencion_en                  TEXT,
-  cerrada_en                      TEXT,
-  cancelada_en                    TEXT,
-  creado_en                       TEXT NOT NULL,
-  actualizado_en                  TEXT NOT NULL,
-  version                         INTEGER NOT NULL DEFAULT 1
-);
+interface DefinicionColeccion {
+  nombre: string;
+  validador: Document;
+  indices: IndexDescription[];
+}
 
-CREATE INDEX IF NOT EXISTS ix_emergencias_estado ON emergencias(estado);
-CREATE INDEX IF NOT EXISTS ix_emergencias_prioridad ON emergencias(prioridad);
+const DEFINICIONES: DefinicionColeccion[] = [
+  {
+    nombre: COLECCIONES.usuarios,
+    validador: {
+      bsonType: 'object',
+      required: ['_id', 'nombreCompleto', 'correo', 'rol', 'activo', 'creadoEn', 'actualizadoEn'],
+      properties: { _id: texto, nombreCompleto: texto, correo: texto, rol: enumeracion(RolUsuario), activo: { bsonType: 'bool' } },
+    },
+    indices: [{ key: { correo: 1 }, name: 'ux_usuarios_correo', unique: true }],
+  },
+  {
+    nombre: COLECCIONES.unidades,
+    validador: {
+      bsonType: 'object',
+      required: ['_id', 'codigo', 'nombre', 'tipo', 'estado', 'activa', 'baseNombre', 'ubicacionBase', 'ubicacionActual', 'version'],
+      properties: {
+        _id: texto,
+        codigo: texto,
+        tipo: enumeracion(TipoUnidad),
+        estado: enumeracion(EstadoUnidad),
+        activa: { bsonType: 'bool' },
+        ubicacionBase: punto,
+        ubicacionActual: punto,
+        usuarioResponsableId: textoONulo,
+        version: { bsonType: ['int', 'long'], minimum: 1 },
+      },
+    },
+    indices: [
+      { key: { codigo: 1 }, name: 'ux_unidades_codigo', unique: true },
+      { key: { estado: 1, tipo: 1 }, name: 'ix_unidades_estado_tipo' },
+      { key: { ubicacionActual: '2dsphere' }, name: 'ix_unidades_ubicacion' },
+      {
+        key: { usuarioResponsableId: 1 },
+        name: 'ux_unidades_responsable',
+        unique: true,
+        partialFilterExpression: { usuarioResponsableId: { $type: 'string' } },
+      },
+    ],
+  },
+  {
+    nombre: COLECCIONES.emergencias,
+    validador: {
+      bsonType: 'object',
+      required: [
+        '_id', 'codigo', 'tipo', 'descripcion', 'direccionReportada', 'telefonoReportante', 'numeroAfectados',
+        'puntajePrioridad', 'prioridad', 'estado', 'reportadaEn', 'version',
+      ],
+      properties: {
+        _id: texto,
+        codigo: texto,
+        tipo: enumeracion(TipoEmergencia),
+        ubicacion: { oneOf: [punto, { bsonType: 'null' }] },
+        fuenteUbicacion: enumeracionONula(FuenteUbicacion),
+        numeroAfectados: { bsonType: ['int', 'long'], minimum: 0, maximum: 500 },
+        hayRiesgoVital: { bsonType: 'bool' },
+        hayHeridos: { bsonType: 'bool' },
+        hayRiesgoPropagacion: { bsonType: 'bool' },
+        puntajePrioridad: { bsonType: ['int', 'long'], minimum: 0, maximum: 100 },
+        prioridad: enumeracion(NivelPrioridad),
+        estado: enumeracion(EstadoEmergencia),
+        motivoCancelacion: enumeracionONula(MotivoCancelacion),
+        version: { bsonType: ['int', 'long'], minimum: 1 },
+      },
+    },
+    indices: [
+      { key: { codigo: 1 }, name: 'ux_emergencias_codigo', unique: true },
+      { key: { estado: 1 }, name: 'ix_emergencias_estado' },
+      { key: { prioridad: 1 }, name: 'ix_emergencias_prioridad' },
+      { key: { tipo: 1, reportadaEn: 1 }, name: 'ix_emergencias_tipo_fecha' },
+      { key: { ubicacion: '2dsphere' }, name: 'ix_emergencias_ubicacion', sparse: true },
+    ],
+  },
+  {
+    nombre: COLECCIONES.despachos,
+    validador: {
+      bsonType: 'object',
+      required: ['_id', 'emergenciaId', 'unidadId', 'estado', 'distanciaKm', 'tiempoEstimadoMin', 'asignadoEn'],
+      properties: { _id: texto, emergenciaId: texto, unidadId: texto, estado: enumeracion(EstadoDespacho) },
+    },
+    indices: [
+      // RN-53: una unidad solo puede tener un despacho ACTIVO a la vez (indice unico parcial)
+      {
+        key: { unidadId: 1 },
+        name: 'ux_despacho_activo_por_unidad',
+        unique: true,
+        partialFilterExpression: { estado: EstadoDespacho.ACTIVO },
+      },
+      { key: { emergenciaId: 1, asignadoEn: 1 }, name: 'ix_despachos_emergencia' },
+    ],
+  },
+  {
+    nombre: COLECCIONES.historialEmergencias,
+    validador: {
+      bsonType: 'object',
+      required: ['_id', 'emergenciaId', 'estadoNuevo', 'ocurridoEn', 'secuencia'],
+      properties: { estadoNuevo: enumeracion(EstadoEmergencia), estadoAnterior: enumeracionONula(EstadoEmergencia) },
+    },
+    indices: [{ key: { emergenciaId: 1, secuencia: 1 }, name: 'ux_historial_emergencia', unique: true }],
+  },
+  {
+    nombre: COLECCIONES.historialUnidades,
+    validador: {
+      bsonType: 'object',
+      required: ['_id', 'unidadId', 'estadoNuevo', 'ocurridoEn', 'secuencia'],
+      properties: { estadoNuevo: enumeracion(EstadoUnidad), estadoAnterior: enumeracionONula(EstadoUnidad) },
+    },
+    indices: [{ key: { unidadId: 1, secuencia: 1 }, name: 'ux_historial_unidad', unique: true }],
+  },
+];
 
-CREATE TABLE IF NOT EXISTS despachos (
-  id                   TEXT PRIMARY KEY,
-  emergencia_id        TEXT NOT NULL REFERENCES emergencias(id) ON DELETE CASCADE,
-  unidad_id            TEXT NOT NULL REFERENCES unidades(id),
-  despachador_id       TEXT REFERENCES usuarios(id) ON DELETE SET NULL,
-  estado               TEXT NOT NULL CHECK (estado IN ('ACTIVO','FINALIZADO','CANCELADO')),
-  distancia_km         REAL NOT NULL,
-  tiempo_estimado_min  INTEGER NOT NULL,
-  asignado_en          TEXT NOT NULL,
-  llegada_en           TEXT,
-  liberado_en          TEXT,
-  observaciones        TEXT
-);
+/** Crea las colecciones (si no existen), aplica sus validadores y crea los indices. Es idempotente. */
+export async function aplicarEsquema(db: Db): Promise<void> {
+  const existentes = new Set((await db.listCollections({}, { nameOnly: true }).toArray()).map((c) => c.name));
+  for (const def of DEFINICIONES) {
+    const validacion = { validator: { $jsonSchema: def.validador }, validationLevel: 'strict', validationAction: 'error' } as const;
+    if (existentes.has(def.nombre)) {
+      await db.command({ collMod: def.nombre, ...validacion });
+    } else {
+      await db.createCollection(def.nombre, validacion);
+    }
+    await db.collection(def.nombre).createIndexes(def.indices);
+  }
+}
 
--- RN-53: una unidad solo puede tener un despacho ACTIVO a la vez
-CREATE UNIQUE INDEX IF NOT EXISTS ux_despacho_activo_por_unidad ON despachos(unidad_id) WHERE estado = 'ACTIVO';
-CREATE INDEX IF NOT EXISTS ix_despachos_emergencia ON despachos(emergencia_id);
-
-CREATE TABLE IF NOT EXISTS historial_estados_emergencia (
-  id               TEXT PRIMARY KEY,
-  emergencia_id    TEXT NOT NULL REFERENCES emergencias(id) ON DELETE CASCADE,
-  estado_anterior  TEXT,
-  estado_nuevo     TEXT NOT NULL,
-  usuario_id       TEXT REFERENCES usuarios(id) ON DELETE SET NULL,
-  motivo           TEXT,
-  ocurrido_en      TEXT NOT NULL,
-  secuencia        INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS ix_historial_emergencia ON historial_estados_emergencia(emergencia_id, secuencia);
-
-CREATE TABLE IF NOT EXISTS historial_estados_unidad (
-  id               TEXT PRIMARY KEY,
-  unidad_id        TEXT NOT NULL REFERENCES unidades(id) ON DELETE CASCADE,
-  estado_anterior  TEXT,
-  estado_nuevo     TEXT NOT NULL,
-  despacho_id      TEXT REFERENCES despachos(id) ON DELETE SET NULL,
-  usuario_id       TEXT REFERENCES usuarios(id) ON DELETE SET NULL,
-  motivo           TEXT,
-  ocurrido_en      TEXT NOT NULL,
-  secuencia        INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS ix_historial_unidad ON historial_estados_unidad(unidad_id, secuencia);
-`;
-
-/** Tablas en orden seguro para vaciarlas (hijos primero). */
-export const TABLAS_EN_ORDEN_DE_BORRADO = [
-  'historial_estados_unidad',
-  'historial_estados_emergencia',
-  'despachos',
-  'emergencias',
-  'unidades',
-  'usuarios',
-] as const;
+/** Borra todos los documentos (lo usa el seed para dejar datos limpios). */
+export async function vaciarColecciones(db: Db): Promise<void> {
+  for (const nombre of Object.values(COLECCIONES)) {
+    await db.collection(nombre).deleteMany({});
+  }
+}

@@ -22,20 +22,21 @@ export interface DetalleUnidad extends UnidadConContexto {
 export class UnidadesServicio {
   constructor(private readonly dep: DependenciasAplicacion) {}
 
-  listar(filtro: FiltroUnidades): UnidadConContexto[] {
+  async listar(filtro: FiltroUnidades): Promise<UnidadConContexto[]> {
     const ahora = this.dep.tiempo.ahora();
-    return this.dep.unidades.listar(filtro).map((unidad) => this.conContexto(unidad, ahora));
+    const unidades = await this.dep.unidades.listar(filtro);
+    return Promise.all(unidades.map((unidad) => this.conContexto(unidad, ahora)));
   }
 
-  obtener(id: string): DetalleUnidad {
-    const unidad = this.dep.unidades.buscarPorId(id);
+  async obtener(id: string): Promise<DetalleUnidad> {
+    const unidad = await this.dep.unidades.buscarPorId(id);
     if (!unidad) throw new ErrorNoEncontrado('Unidad', id);
-    return { ...this.conContexto(unidad, this.dep.tiempo.ahora()), historial: this.dep.unidades.listarHistorial(id) };
+    return { ...(await this.conContexto(unidad, this.dep.tiempo.ahora())), historial: await this.dep.unidades.listarHistorial(id) };
   }
 
-  private conContexto(unidad: Unidad, ahora: Date): UnidadConContexto {
-    const despachoActivo = this.dep.despachos.buscarActivoPorUnidad(unidad.id);
-    const emergenciaActiva = despachoActivo ? this.dep.emergencias.buscarPorId(despachoActivo.emergenciaId) : null;
+  private async conContexto(unidad: Unidad, ahora: Date): Promise<UnidadConContexto> {
+    const despachoActivo = await this.dep.despachos.buscarActivoPorUnidad(unidad.id);
+    const emergenciaActiva = despachoActivo ? await this.dep.emergencias.buscarPorId(despachoActivo.emergenciaId) : null;
     return {
       unidad,
       despachoActivo,
