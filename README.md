@@ -8,7 +8,7 @@ Proyecto académico de Ingeniería de Software, Universidad Cooperativa de Colom
 
 | Componente | Tecnología | Carpeta |
 |---|---|---|
-| Backend (API REST) | Node.js, TypeScript, Express 5, SQLite (better-sqlite3), Zod | [`rescateflow-api/`](rescateflow-api/) |
+| Backend (API REST) | Node.js, TypeScript, Express 5, MongoDB, Zod | [`rescateflow-api/`](rescateflow-api/) |
 | Frontend (panel operativo) | React 19, Vite, TypeScript | [`rescateflow-web/`](rescateflow-web/) |
 | Pruebas de API | Postman (colección v2.1 + entorno), Newman | [`postman/`](postman/) |
 | Diagramas de arquitectura | Visual Paradigm 18.1 | [`diagramas/`](diagramas/) |
@@ -17,13 +17,13 @@ Proyecto académico de Ingeniería de Software, Universidad Cooperativa de Colom
 
 ## Puesta en marcha rápida
 
-Requisitos: Node.js 20.19 o superior (recomendado 22 LTS).
+Requisitos: Node.js 20.19 o superior (recomendado 22 LTS) y **MongoDB** encendido en `mongodb://127.0.0.1:27017` (MongoDB Community Server, Docker `docker run -d -p 27017:27017 mongo:7` o MongoDB Atlas). Detalles en [`rescateflow-api/README.md`](rescateflow-api/README.md#base-de-datos-mongodb).
 
 ```bash
 # Terminal 1: backend en http://localhost:3000/api
 cd rescateflow-api
 npm install
-npm run seed        # 4 unidades y 5 emergencias de prueba
+npm run seed        # crea la base rescateflow en MongoDB con 4 unidades y 5 emergencias
 npm run dev
 
 # Terminal 2: frontend en http://localhost:5173
@@ -126,7 +126,7 @@ Panel operativo en modo oscuro: tarjetas de resumen, formulario de registro con 
 
 | Tipo | Cómo ejecutar | Resultado |
 |---|---|---|
-| Unitarias y end-to-end del backend | `cd rescateflow-api && npm test` | 55 pruebas |
+| Unitarias y end-to-end del backend | `cd rescateflow-api && npm test` (usa un MongoDB temporal en memoria) | 58 pruebas |
 | Postman (flujo exitoso, casos negativos y reglas de negocio) | Importar `postman/*.json` en Postman y ejecutar la colección, o `npx newman run postman/RescateFlow.postman_collection.json -e postman/RescateFlow.postman_environment.json` | 30 peticiones, 170 aserciones |
 
 Guía completa de Postman en [`postman/README.md`](postman/README.md).
@@ -135,8 +135,8 @@ Guía completa de Postman en [`postman/README.md`](postman/README.md).
 
 ## Arquitectura y principios de diseño
 
-- **Arquitectura en capas** con la regla de dependencia hacia el dominio: las reglas de negocio no conocen Express, SQLite ni HTTP.
-- **Patrón Repository**: el dominio define interfaces (`EmergenciaRepositorio`, `UnidadRepositorio`...) y la infraestructura las implementa con SQLite.
+- **Arquitectura en capas** con la regla de dependencia hacia el dominio: las reglas de negocio no conocen Express, MongoDB ni HTTP.
+- **Patrón Repository**: el dominio define interfaces (`EmergenciaRepositorio`, `UnidadRepositorio`...) y la infraestructura las implementa con MongoDB (`Mongo*Repositorio`). El cambio de SQLite a MongoDB solo tocó la capa de infraestructura y la raíz de composición: el dominio no cambió.
 - **Patrón Adapter**: `ServicioGeocodificacion` con dos adaptadores intercambiables (`NominatimGeocodificacionAdapter` y `SimuladoGeocodificacionAdapter`).
 - **Máquinas de estado por tabla**: todo lo que no está en la tabla de transiciones está prohibido.
 - **Transacciones (unidad de trabajo)**: asignar una unidad crea el despacho, cambia la unidad a EN_RUTA, la emergencia a DESPACHADA y registra el historial en una sola operación atómica.
