@@ -30,8 +30,8 @@ interface DocumentoHistorialUnidad {
 function aEntidad(d: DocumentoUnidad): Unidad {
   const { _id, ubicacionBase, ubicacionActual, ...resto } = d;
   return Unidad.reconstruir({
-    ...resto,
     id: _id,
+    ...resto,
     ubicacionBase: desdePunto(ubicacionBase),
     ubicacionActual: desdePunto(ubicacionActual),
   });

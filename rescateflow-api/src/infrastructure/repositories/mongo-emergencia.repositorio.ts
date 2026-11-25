@@ -29,7 +29,7 @@ const ESTADOS_FINALES: EstadoEmergencia[] = [EstadoEmergencia.CERRADA, EstadoEme
 
 function aEntidad(d: DocumentoEmergencia): Emergencia {
   const { _id, ubicacion, ...resto } = d;
-  return Emergencia.reconstruir({ ...resto, id: _id, ubicacion: ubicacion ? desdePunto(ubicacion) : null });
+  return Emergencia.reconstruir({ id: _id, ...resto, ubicacion: ubicacion ? desdePunto(ubicacion) : null });
 }
 
 function aDocumento(e: Emergencia): DocumentoEmergencia {

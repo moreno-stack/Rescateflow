@@ -11,7 +11,7 @@ type DocumentoDespacho = Omit<PropiedadesDespacho, 'id'> & { _id: string };
 
 function aEntidad(d: DocumentoDespacho): Despacho {
   const { _id, ...resto } = d;
-  return Despacho.reconstruir({ ...resto, id: _id });
+  return Despacho.reconstruir({ id: _id, ...resto });
 }
 
 /** Implementacion MongoDB del puerto DespachoRepositorio. */
